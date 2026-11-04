@@ -14,6 +14,25 @@
 
 ---
 
+## 📥 Direct Download — Pre-built macOS Installers (No Build Required)
+
+You can download the pre-built **`.dmg` Installer** or **`.zip` App Bundle** directly without installing Rust or building from source:
+
+| Version | Status | 💿 macOS `.dmg` Installer | 🗜️ macOS `.zip` Portable | 📋 Release Page |
+| :--- | :--- | :--- | :--- | :--- |
+| **v2.0.0** | 🌟 **Latest Stable** | [**⬇️ Download `MacOmniTool-v2.0.0-Installer.dmg` (3.1 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.0.0/MacOmniTool-v2.0.0-Installer.dmg) | [**⬇️ Download `MacOmniTool-v2.0.0-macOS.zip` (2.6 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.0.0/MacOmniTool-v2.0.0-macOS.zip) | [GitHub Release v2.0.0](https://github.com/boykhacthang/mac-omni-tool/releases/tag/v2.0.0) |
+| **v1.0.0** | 📦 Core Edition | [**⬇️ Download `MacOmniTool-v1.0.0-Installer.dmg` (3.1 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v1.0.0/MacOmniTool-v1.0.0-Installer.dmg) | [**⬇️ Download `MacOmniTool-v1.0.0-macOS.zip` (2.6 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v1.0.0/MacOmniTool-v1.0.0-macOS.zip) | [GitHub Release v1.0.0](https://github.com/boykhacthang/mac-omni-tool/releases/tag/v1.0.0) |
+
+### ⚡ Quick Installation Steps (30 Seconds)
+1. Download **`MacOmniTool-v2.0.0-Installer.dmg`** above and double-click to open it.
+2. Drag **`MacOmniTool.app`** into the **`Applications`** folder.
+3. **First Launch on a New Mac (Gatekeeper Bypass)**: Because this is a free community open-source app without a paid \$99/year Apple Developer notarization certificate, double-click **`Mo-Khoa-App-Tren-May-Moi.command`** inside the `.dmg` (or run the command below in Terminal once):
+   ```bash
+   xattr -cr /Applications/MacOmniTool.app && open /Applications/MacOmniTool.app
+   ```
+
+---
+
 ## 🚀 Feature Evolution Across 2 Versions (`v1.0` & `v2.0`)
 
 ### 🌟 Version 1.0 — Core All-in-One Foundation

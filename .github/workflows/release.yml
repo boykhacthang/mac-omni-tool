@@ -1,0 +1,57 @@
+name: Release macOS DMG & ZIP
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish macOS Release Assets
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine version from tag
+        id: ver
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME:-v2.0.0}"
+          echo "tag=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare Release Artifacts
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+          mkdir -p dist
+          if [[ -d "releases/${TAG}" ]] && ls "releases/${TAG}"/*.dmg >/dev/null 2>&1; then
+            cp "releases/${TAG}"/*.dmg dist/
+            cp "releases/${TAG}"/*.zip dist/
+          else
+            ./build_installer_dmg.sh
+            cp target/release/MacOmniTool-Installer.dmg "dist/MacOmniTool-${TAG}-Installer.dmg"
+            cp target/release/MacOmniTool-macOS.zip "dist/MacOmniTool-${TAG}-macOS.zip"
+          fi
+          shasum -a 256 dist/* > dist/SHA256SUMS.txt
+
+      - name: Create GitHub Release & Upload DMG/ZIP
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: "Mac Omni Tool ${{ steps.ver.outputs.tag }} — Native macOS All-in-One Utility"
+          generate_release_notes: true
+          files: |
+            dist/*.dmg
+            dist/*.zip
+            dist/SHA256SUMS.txt
+          body: |
+            ## 📥 Direct Download (No Build Required / Tải bộ cài đặt trực tiếp)
+            - 💿 **DMG Installer (`MacOmniTool-${{ steps.ver.outputs.tag }}-Installer.dmg`)**: Open `.dmg`, drag **`MacOmniTool.app`** into **`Applications`**.
+            - 🗜️ **ZIP Archive (`MacOmniTool-${{ steps.ver.outputs.tag }}-macOS.zip`)**: Extract and move **`MacOmniTool.app`** to **`/Applications`**.
+            - 🔓 **First Launch on a New Mac (Mở khóa Gatekeeper lần đầu)**: Double-click `Mo-Khoa-App-Tren-May-Moi.command` inside the `.dmg` or run:
+              ```bash
+              xattr -cr /Applications/MacOmniTool.app && open /Applications/MacOmniTool.app
+              ```

@@ -14,6 +14,25 @@
 
 ---
 
+## 📥 Tải Về Bộ Cài Đặt Sẵn (`.dmg` / `.zip` — Không Cần Build Lại)
+
+Người dùng chỉ cần tải trực tiếp bộ cài **`.dmg`** hoặc **`.zip`** đã được đóng gói sẵn bên dưới về dùng ngay mà không cần cài Rust hay biên dịch lại mã nguồn:
+
+| Phiên bản | Trạng thái | 💿 Bộ cài `.dmg` chuẩn macOS | 🗜️ Bản nén `.zip` gọn nhẹ | 📋 Trang Release |
+| :--- | :--- | :--- | :--- | :--- |
+| **v2.0.0** | 🌟 **Mới nhất (Khuyên dùng)** | [**⬇️ Tải `MacOmniTool-v2.0.0-Installer.dmg` (3.1 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.0.0/MacOmniTool-v2.0.0-Installer.dmg) | [**⬇️ Tải `MacOmniTool-v2.0.0-macOS.zip` (2.6 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.0.0/MacOmniTool-v2.0.0-macOS.zip) | [GitHub Release v2.0.0](https://github.com/boykhacthang/mac-omni-tool/releases/tag/v2.0.0) |
+| **v1.0.0** | 📦 Bản nền tảng | [**⬇️ Tải `MacOmniTool-v1.0.0-Installer.dmg` (3.1 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v1.0.0/MacOmniTool-v1.0.0-Installer.dmg) | [**⬇️ Tải `MacOmniTool-v1.0.0-macOS.zip` (2.6 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v1.0.0/MacOmniTool-v1.0.0-macOS.zip) | [GitHub Release v1.0.0](https://github.com/boykhacthang/mac-omni-tool/releases/tag/v1.0.0) |
+
+### ⚡ Hướng dẫn Cài đặt Nhanh (30 Giây)
+1. Tải file **`MacOmniTool-v2.0.0-Installer.dmg`** ở bảng trên và mở lên.
+2. Kéo **`MacOmniTool.app`** thả vào thư mục **`Applications`**.
+3. **Mở khóa lần đầu trên máy Mac mới**: Vì đây là bản cộng đồng miễn phí không thu phí chứng chỉ Apple Developer (\$99/năm), ở lần mở đầu tiên bạn chỉ cần bấm đúp vào file **`Mo-Khoa-App-Tren-May-Moi.command`** có sẵn trong `.dmg` (hoặc chạy lệnh sau trong Terminal):
+   ```bash
+   xattr -cr /Applications/MacOmniTool.app && open /Applications/MacOmniTool.app
+   ```
+
+---
+
 ## 🚀 Các Tính Năng Qua 2 Phiên Bản (`v1.0` & `v2.0`)
 
 ### 🌟 Phiên bản 1.0 — Nền tảng All-in-One Cốt lõi
