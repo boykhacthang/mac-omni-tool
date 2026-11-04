@@ -466,10 +466,15 @@ async function renderUnifiedSettingsScreen(view) {
 
       <!-- ABOUT, AUTHOR & FREE COMMUNITY EDITION / DONATE -->
       <div class="card" style="margin-bottom:0;border:1px solid rgba(59,130,246,0.28);">
-        <div class="card-header" style="flex-wrap:wrap;gap:10px;margin-bottom:6px;">
+        <div class="card-header" style="flex-wrap:wrap;gap:10px;margin-bottom:8px;">
           <div class="card-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <span>💡 ${t("settings.about_community_title")}</span>
             <span class="badge-ok">v2.1.0 • MIT License</span>
+            ${cfg.auto_check_updates === false ? `
+              <span class="badge-ok" style="font-size:11px;">
+                ${escapeHtml(t("update.keep_current_mode_badge", { version: "2.1.0" }))}
+              </span>
+            ` : ""}
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <button class="btn btn-sm btn-primary" id="btn-check-update-settings">
@@ -488,6 +493,16 @@ async function renderUnifiedSettingsScreen(view) {
               <span>Support me on Ko-fi</span>
             </button>
           </div>
+        </div>
+        <div class="row" style="margin-bottom:8px;">
+          <div>
+            <div style="font-weight:700;font-size:12.5px;">${t("update.auto_check_label")}</div>
+            <div class="stat-sub">${t("update.auto_check_sub")}</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="chk-auto-check-updates" ${cfg.auto_check_updates !== false ? "checked" : ""} />
+            <span class="slider"></span>
+          </label>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;font-size:12px;color:var(--text-muted);">
           <div>
@@ -586,6 +601,7 @@ async function renderUnifiedSettingsScreen(view) {
       menubar_show_net: chkVal("chk-mb-net", !!cfg.menubar_show_net),
       menubar_refresh_interval_sec: numVal("sel-menubar-interval", cfg.menubar_refresh_interval_sec || 3),
       keep_running_in_background: chkVal("chk-keep-background", cfg.keep_running_in_background !== false),
+      auto_check_updates: chkVal("chk-auto-check-updates", cfg.auto_check_updates !== false),
       ...patch
     };
     await api("update_input_config", updated);
@@ -637,6 +653,13 @@ async function renderUnifiedSettingsScreen(view) {
   bindChange("chk-mb-ram", () => saveCfg());
   bindChange("chk-mb-net", () => saveCfg());
   bindChange("chk-keep-background", () => saveCfg());
+  bindChange("chk-auto-check-updates", (e) => {
+    const enabled = e.target.checked;
+    saveCfg({
+      auto_check_updates: enabled,
+      skipped_update_version: enabled ? "" : (cfg.skipped_update_version || "")
+    });
+  });
   bindClick("btn-hide-to-background-now", () => {
     api("hide_launcher");
   });

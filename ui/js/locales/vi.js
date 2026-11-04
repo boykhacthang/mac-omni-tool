@@ -667,8 +667,18 @@ window.OMNI_LOCALES.vi = {
     "update.available_badge": "🎉 Có bản cập nhật mới v{latest}! (Hiện tại: v{current})",
     "update.btn_install_now": "⚡ Tự động Cập nhật & Khởi động lại (v{latest})",
     "update.btn_download_dmg": "💿 Tải file .dmg",
+    "update.btn_keep_current": "📌 Giữ nguyên bản hiện tại (Bỏ qua v{latest})",
+    "update.btn_disable_checks": "🔕 Không kiểm tra cập nhật nữa",
+    "update.btn_enable_checks": "🔔 Bật lại tự động kiểm tra",
+    "update.auto_check_label": "🔄 Tự động kiểm tra cập nhật khi mở ứng dụng",
+    "update.auto_check_sub": "Tắt để giữ nguyên phiên bản hiện tại và không tự động kiểm tra cập nhật nữa",
+    "update.keep_current_mode_badge": "🔒 Đang giữ nguyên bản hiện tại (v{version}) — Đã tắt tự động kiểm tra cập nhật",
+    "update.skipped_badge": "📌 Đang giữ nguyên v{current} (Đã bỏ qua bản v{latest})",
     "update.installing": "⏳ Đang tải & cài đặt v{latest}... Ứng dụng sẽ tự khởi động lại!",
     "update.toast_new_version": "🎉 Đã có phiên bản mới v{latest}! Bấm 'Giới thiệu' để tự động cập nhật.",
+    "update.toast_kept_current": "📌 Đã giữ nguyên phiên bản hiện tại (bỏ qua v{latest}).",
+    "update.toast_disabled_checks": "🔒 Đã bật chế độ giữ nguyên phiên bản hiện tại & ngừng kiểm tra cập nhật.",
+    "update.toast_enabled_checks": "🔔 Đã bật lại tự động kiểm tra cập nhật.",
     "update.toast_failed": "Không thể kiểm tra cập nhật: {error}"
   }
 };

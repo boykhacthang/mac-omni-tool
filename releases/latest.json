@@ -3,7 +3,7 @@
   "published_at": "2026-11-04",
   "zip_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.1.0/MacOmniTool-v2.1.0-macOS.zip",
   "dmg_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.1.0/MacOmniTool-v2.1.0-Installer.dmg",
-  "sha256_zip": "4e1b47b61303b460ad0208796a2db5cbf936d95688ec4ddb98605a97bda8dd86",
-  "notes_en": "Added Menu Bar customization & background mode, eliminated overlay screen freeze, and added global Esc / Option+Esc emergency unfreeze hotkey",
-  "notes_vi": "Th\u00eam tu\u1ef3 ch\u1ec9nh Menu Bar & ch\u1ebf \u0111\u1ed9 ch\u1ea1y ng\u1ea7m, kh\u1eafc ph\u1ee5c tri\u1ec7t \u0111\u1ec3 l\u1ed7i \u0111\u01a1 m\u00e0n h\u00ecnh v\u00e0 b\u1ed5 sung ph\u00edm t\u1eaft kh\u1ea9n c\u1ea5p Esc / Option+Esc"
+  "sha256_zip": "d0b3928518c4ff0f216d4885dffb1941587aef036711347a3970fe1cd73f1aa6",
+  "notes_en": "Added Menu Bar customization, background mode, Keep Current Version / Disable Auto-Update Check mode, and eliminated overlay screen freeze with global Esc emergency hotkey",
+  "notes_vi": "Th\u00eam tu\u1ef3 ch\u1ec9nh Menu Bar, ch\u1ebf \u0111\u1ed9 ch\u1ea1y ng\u1ea7m, kho\u00e1 gi\u1eef nguy\u00ean phi\u00ean b\u1ea3n hi\u1ec7n t\u1ea1i (t\u1eaft ki\u1ec3m tra c\u1eadp nh\u1eadt) v\u00e0 kh\u1eafc ph\u1ee5c tri\u1ec7t \u0111\u1ec3 l\u1ed7i \u0111\u01a1 m\u00e0n h\u00ecnh + ph\u00edm Esc kh\u1ea9n c\u1ea5p"
 }

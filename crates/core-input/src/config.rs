@@ -177,6 +177,12 @@ pub struct InputAutomationConfig {
     /// Phím tắt toàn cục mở nhanh Bảng điều khiển (hữu ích khi ẩn Menu Bar & chạy ngầm)
     #[serde(default = "default_dashboard_shortcut")]
     pub dashboard_shortcut: String,
+    /// Bật/tắt tự động kiểm tra bản cập nhật mới (Tắt = Giữ nguyên phiên bản hiện tại, không kiểm tra cập nhật nữa)
+    #[serde(default = "default_true")]
+    pub auto_check_updates: bool,
+    /// Phiên bản cập nhật mà người dùng đã chọn bỏ qua để giữ nguyên phiên bản hiện tại (VD: "2.2.0")
+    #[serde(default)]
+    pub skipped_update_version: String,
 }
 
 fn default_true() -> bool {
@@ -312,6 +318,8 @@ impl Default for InputAutomationConfig {
             menubar_refresh_interval_sec: default_menubar_refresh_sec(),
             keep_running_in_background: true,
             dashboard_shortcut: default_dashboard_shortcut(),
+            auto_check_updates: true,
+            skipped_update_version: String::new(),
         }
     }
 }

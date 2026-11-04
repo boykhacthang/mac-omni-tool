@@ -669,8 +669,18 @@ window.OMNI_LOCALES.en = {
     "update.available_badge": "🎉 New Version v{latest} Available! (Current: v{current})",
     "update.btn_install_now": "⚡ Auto-Update & Restart Now (v{latest})",
     "update.btn_download_dmg": "💿 Download .dmg",
+    "update.btn_keep_current": "📌 Keep Current Version (Skip v{latest})",
+    "update.btn_disable_checks": "🔕 Stop Checking for Updates",
+    "update.btn_enable_checks": "🔔 Re-enable Auto-Check",
+    "update.auto_check_label": "🔄 Automatically check for updates on launch",
+    "update.auto_check_sub": "Turn off to lock your current version and stop checking for updates",
+    "update.keep_current_mode_badge": "🔒 Keeping current version (v{version}) — Automatic update checks disabled",
+    "update.skipped_badge": "📌 Keeping v{current} (Skipped v{latest})",
     "update.installing": "⏳ Downloading & installing v{latest}... App will restart automatically!",
     "update.toast_new_version": "🎉 New version v{latest} is available! Click 'About App' to update.",
+    "update.toast_kept_current": "📌 Kept current version (skipped v{latest}).",
+    "update.toast_disabled_checks": "🔒 Locked current version & disabled automatic update checks.",
+    "update.toast_enabled_checks": "🔔 Re-enabled automatic update checks.",
     "update.toast_failed": "Update check failed: {error}"
   }
 };
