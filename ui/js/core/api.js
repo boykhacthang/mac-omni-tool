@@ -116,3 +116,70 @@ function eventToShortcutString(e) {
   return parts.join("+");
 }
 
+function formatCompactNetRate(bytesPerSec) {
+  const b = Number(bytesPerSec || 0);
+  if (b < 1024) return "0 KB/s";
+  if (b < 1024 * 1024) return Math.round(b / 1024) + " KB/s";
+  if (b < 1024 * 1024 * 1024) return (b / (1024 * 1024)).toFixed(1) + " MB/s";
+  return (b / (1024 * 1024 * 1024)).toFixed(1) + " GB/s";
+}
+
+function formatMenuBarTitlePreview(cfg, hw) {
+  const c = cfg || {};
+  const h = hw || {};
+  const rawIcon = String(c.menubar_icon || "❖").trim();
+  const icon = rawIcon.toLowerCase() === "none" || !rawIcon ? "" : rawIcon;
+  const withPrefix = (body) => {
+    if (!body) return icon || "❖";
+    return icon ? `${icon} ${body}` : body;
+  };
+
+  const rawTemp = h.cpu_temp_c ?? (h.temperatures && h.temperatures.cpu_temp_c) ?? 45;
+  const tempStr = Math.max(30, Math.round(Number(rawTemp || 45))) + "°C";
+  const cpuVal = Math.max(0, Number(h.cpu_usage_percent ?? 12.4));
+  const cpuPctStr = cpuVal.toFixed(1) + "%";
+  const ramVal = Math.max(0, Math.round(Number(h.memory_usage_percent ?? 54)));
+  const ramPctStr = ramVal + "%";
+  const usedGb = (Number(h.used_memory_bytes || (8.6 * 1073741824)) / 1073741824).toFixed(1);
+  const totalGb = Math.max(1, Math.round(Number(h.total_memory_bytes || (16 * 1073741824)) / 1073741824));
+  const rxStr = formatCompactNetRate(h.net_rx_bytes_per_sec || 0);
+  const txStr = formatCompactNetRate(h.net_tx_bytes_per_sec || 0);
+
+  const mode = String(c.menubar_display_mode || "temp_cpu");
+  switch (mode) {
+    case "icon_only":
+      return withPrefix("");
+    case "icon_name":
+      return icon ? `${icon} Omni` : "Omni";
+    case "temp_only":
+      return withPrefix(tempStr);
+    case "cpu_only":
+      return withPrefix(cpuPctStr);
+    case "ram_only":
+      return withPrefix(`RAM ${ramPctStr}`);
+    case "ram_gb":
+      return withPrefix(`${usedGb}/${totalGb} GB`);
+    case "cpu_ram":
+      return withPrefix(`CPU ${cpuPctStr} • RAM ${ramPctStr}`);
+    case "temp_cpu_ram":
+      return withPrefix(`${tempStr} • CPU ${Math.round(cpuVal)}% • RAM ${ramPctStr}`);
+    case "net_speed":
+      return withPrefix(`↓ ${rxStr} ↑ ${txStr}`);
+    case "temp_net":
+      return withPrefix(`${tempStr} • ↓ ${rxStr}`);
+    case "custom": {
+      const parts = [];
+      if (c.menubar_show_temp !== false) parts.push(tempStr);
+      if (c.menubar_show_cpu !== false) {
+        parts.push(c.menubar_show_ram ? `CPU ${Math.round(cpuVal)}%` : cpuPctStr);
+      }
+      if (c.menubar_show_ram) parts.push(`RAM ${ramPctStr}`);
+      if (c.menubar_show_net) parts.push(`↓ ${rxStr} ↑ ${txStr}`);
+      return withPrefix(parts.join(" • "));
+    }
+    default:
+      return withPrefix(`${tempStr} • ${cpuPctStr}`);
+  }
+}
+
+

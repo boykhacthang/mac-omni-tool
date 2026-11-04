@@ -24,7 +24,8 @@ pub use config::{
 };
 pub use event_tap::{start_global_input_tap, sync_event_tap_enabled};
 pub use spaces::{
-    frontmost_app_info, get_spaces_status, list_running_gui_apps, query_macos_spaces_counts,
+    frontmost_app_info, get_spaces_status, list_installed_gui_apps, list_running_gui_apps,
+    pick_application_bundle_dialog, query_macos_spaces_counts, read_app_bundle_info,
     RunningAppItem, SpacesStatus,
 };
 
@@ -64,6 +65,8 @@ mod tests {
     #[test]
     fn test_per_app_mouse_button_resolution_and_smooth_scroll() {
         let mut cfg = InputAutomationConfig::default();
+        assert_eq!(cfg.app_mouse_profiles.len(), 1);
+        assert_eq!(cfg.app_mouse_profiles[0].bundle_id, "com.google.Chrome");
         // Default: Chrome uses "default" (page forward/back), while other apps use "space_right" / "space_left"
         assert_eq!(
             cfg.resolve_mouse_button_action("com.google.Chrome", 4),
@@ -115,6 +118,7 @@ mod tests {
         cfg.window_snapping_enabled = false;
         cfg.mission_control_shortcut = String::new();
         cfg.show_desktop_shortcut = String::new();
+        cfg.dashboard_shortcut = String::new();
 
         assert!(!cfg.needs_event_tap());
         assert!(!cfg.needs_accessibility());
@@ -128,5 +132,7 @@ mod tests {
         assert!(st.current_space_index >= 1);
 
         let _apps = list_running_gui_apps();
+        let installed = list_installed_gui_apps();
+        assert!(!installed.is_empty());
     }
 }

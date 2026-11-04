@@ -38,7 +38,9 @@ async function initMiniLeftWidget() {
       ? (hwData.cpu_temp_c ?? (hwData.temperatures && hwData.temperatures.cpu_temp_c) ?? 45)
       : 45;
     const cpuTemp = formatTemp(rawTemp);
-    await api("update_menubar_title", { title: `❖ ${cpuTemp} • ${cpuPct}` });
+    if (!inputCfg || (inputCfg.menubar_enabled !== false && inputCfg.menubar_display_mode !== "hidden")) {
+      await api("update_menubar_title", { title: formatMenuBarTitlePreview(inputCfg, hwData) });
+    }
     if (!isDraggingSlider) {
       renderMini();
     }
@@ -56,7 +58,7 @@ async function initMiniLeftWidget() {
     }
   }, 1200);
 
-  // Update Menu Bar temperature & CPU % every 4s (lightweight, skips process table)
+  // Update Menu Bar telemetry when popover is active
   setInterval(async () => {
     if (isDraggingSlider) return;
     const hw = await api("get_menubar_stats");
@@ -65,7 +67,9 @@ async function initMiniLeftWidget() {
       const cpuPct = formatPct(hwData.cpu_usage_percent);
       const rawTemp = hwData.cpu_temp_c ?? (hwData.temperatures && hwData.temperatures.cpu_temp_c) ?? 45;
       const cpuTemp = formatTemp(rawTemp);
-      await api("update_menubar_title", { title: `❖ ${cpuTemp} • ${cpuPct}` });
+      if (!inputCfg || (inputCfg.menubar_enabled !== false && inputCfg.menubar_display_mode !== "hidden")) {
+        await api("update_menubar_title", { title: formatMenuBarTitlePreview(inputCfg, hwData) });
+      }
       const subEl = document.getElementById("mini-hw-sub");
       if (subEl) {
         subEl.textContent = `CPU ${cpuPct} • ${cpuTemp} • RAM ${formatPct(hwData.memory_usage_percent)}`;
@@ -90,6 +94,9 @@ async function initMiniLeftWidget() {
     const muted = audioState ? !!audioState.muted : false;
     const outDevs = (audioState && audioState.output_devices) ? audioState.output_devices : [];
     const curLang = getAppLang();
+    const mouseEnabled = !inputCfg || inputCfg.external_mouse_enabled !== false;
+    const shotRegionEnabled = !inputCfg || (inputCfg.screenshot_enabled !== false && inputCfg.screenshot_region_enabled !== false);
+    const clipEnabled = !inputCfg || inputCfg.clipboard_enabled !== false;
 
     root.innerHTML = `
       <div class="mini-dropdown-panel">
@@ -160,21 +167,41 @@ async function initMiniLeftWidget() {
         <div class="mini-section-card mini-mouse-row">
           <span class="mini-mouse-label">🖱️ ${t("popover.mouse_label")}</span>
           <div class="mini-mouse-actions">
-            <button class="btn btn-sm ${inputCfg && inputCfg.external_mouse_enabled !== false ? 'btn-primary' : ''}" id="mini-btn-mouse-master" title="${t("popover.tip_mouse_master")}">
-              ${inputCfg && inputCfg.external_mouse_enabled !== false ? t("common.on") : t("common.off")}
+            <button class="btn btn-sm ${mouseEnabled ? 'btn-primary' : ''}" id="mini-btn-mouse-master" title="${t("popover.tip_mouse_master")}">
+              ${mouseEnabled ? t("common.on") : t("common.off")}
             </button>
-            <button class="btn btn-sm ${inputCfg && inputCfg.invert_external_mouse_scroll ? 'btn-primary' : ''}" id="mini-btn-mouse-invert" title="${t("popover.tip_mouse_invert")}">
+            <button class="btn btn-sm ${mouseEnabled && inputCfg && inputCfg.invert_external_mouse_scroll ? 'btn-primary' : ''}" id="mini-btn-mouse-invert" title="${t("popover.tip_mouse_invert")}" ${mouseEnabled ? '' : 'disabled'}>
               🔄 ${t("popover.mouse_reverse")}
             </button>
-            <button class="btn btn-sm ${inputCfg && inputCfg.smooth_scroll_enabled !== false ? 'btn-primary' : ''}" id="mini-btn-mouse-smooth" title="${t("popover.tip_mouse_smooth")}">
+            <button class="btn btn-sm ${mouseEnabled && inputCfg && inputCfg.smooth_scroll_enabled !== false ? 'btn-primary' : ''}" id="mini-btn-mouse-smooth" title="${t("popover.tip_mouse_smooth")}" ${mouseEnabled ? '' : 'disabled'}>
               🌊 120Hz
             </button>
           </div>
         </div>
 
+        <!-- Compact Menu Bar Display Mode & Hide to Background -->
+        <div class="mini-section-card mini-mouse-row" style="gap:6px;">
+          <span class="mini-mouse-label">📊 ${t("popover.menubar_label")}</span>
+          <select class="select-box" id="mini-sel-menubar-mode" style="flex:1;min-width:0;padding:2px 6px;font-size:11px;height:24px;">
+            <option value="temp_cpu" ${(!inputCfg || inputCfg.menubar_display_mode === 'temp_cpu') ? 'selected' : ''}>${t("menubar.mode.temp_cpu")}</option>
+            <option value="temp_cpu_ram" ${inputCfg && inputCfg.menubar_display_mode === 'temp_cpu_ram' ? 'selected' : ''}>${t("menubar.mode.temp_cpu_ram")}</option>
+            <option value="cpu_ram" ${inputCfg && inputCfg.menubar_display_mode === 'cpu_ram' ? 'selected' : ''}>${t("menubar.mode.cpu_ram")}</option>
+            <option value="cpu_only" ${inputCfg && inputCfg.menubar_display_mode === 'cpu_only' ? 'selected' : ''}>${t("menubar.mode.cpu_only")}</option>
+            <option value="temp_only" ${inputCfg && inputCfg.menubar_display_mode === 'temp_only' ? 'selected' : ''}>${t("menubar.mode.temp_only")}</option>
+            <option value="ram_only" ${inputCfg && inputCfg.menubar_display_mode === 'ram_only' ? 'selected' : ''}>${t("menubar.mode.ram_only")}</option>
+            <option value="ram_gb" ${inputCfg && inputCfg.menubar_display_mode === 'ram_gb' ? 'selected' : ''}>${t("menubar.mode.ram_gb")}</option>
+            <option value="net_speed" ${inputCfg && inputCfg.menubar_display_mode === 'net_speed' ? 'selected' : ''}>${t("menubar.mode.net_speed")}</option>
+            <option value="temp_net" ${inputCfg && inputCfg.menubar_display_mode === 'temp_net' ? 'selected' : ''}>${t("menubar.mode.temp_net")}</option>
+            <option value="icon_only" ${inputCfg && inputCfg.menubar_display_mode === 'icon_only' ? 'selected' : ''}>${t("menubar.mode.icon_only")}</option>
+            <option value="icon_name" ${inputCfg && inputCfg.menubar_display_mode === 'icon_name' ? 'selected' : ''}>${t("menubar.mode.icon_name")}</option>
+            <option value="custom" ${inputCfg && inputCfg.menubar_display_mode === 'custom' ? 'selected' : ''}>${t("menubar.mode.custom")}</option>
+            <option value="hidden" ${inputCfg && (inputCfg.menubar_enabled === false || inputCfg.menubar_display_mode === 'hidden') ? 'selected' : ''}>${t("menubar.mode.hidden")}</option>
+          </select>
+        </div>
+
         <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;flex-shrink:0;">
-          <button class="btn btn-sm" id="mini-btn-shot" style="height:27px;font-size:11.2px;" title="${t("popover.tip_capture")}">${t("popover.btn_capture")}</button>
-          <button class="btn btn-sm" id="mini-btn-clip" style="height:27px;font-size:11.2px;">📋 Clipboard</button>
+          <button class="btn btn-sm" id="mini-btn-shot" style="height:27px;font-size:11.2px;" title="${t("popover.tip_capture")}" ${shotRegionEnabled ? '' : 'disabled'}>${t("popover.btn_capture")}</button>
+          <button class="btn btn-sm" id="mini-btn-clip" style="height:27px;font-size:11.2px;" ${clipEnabled ? '' : 'disabled'}>📋 Clipboard</button>
           <button class="btn btn-sm" id="mini-btn-mc" style="height:27px;font-size:11.2px;">🚀 F3</button>
         </div>
 
@@ -236,6 +263,23 @@ async function initMiniLeftWidget() {
       if (res && res.config) inputCfg = res.config;
       renderMini();
     };
+    const miniMenuBarSel = document.getElementById("mini-sel-menubar-mode");
+    if (miniMenuBarSel) {
+      miniMenuBarSel.onchange = async (e) => {
+        const mode = e.target.value;
+        const isHidden = mode === "hidden";
+        const res = await api("update_menubar_config", {
+          menubar_enabled: !isHidden,
+          menubar_display_mode: mode
+        });
+        if (res && res.config) inputCfg = res.config;
+        if (isHidden) {
+          await closePopover();
+        } else {
+          renderMini();
+        }
+      };
+    }
     document.getElementById("mini-btn-dark").onclick = async () => {
       await api("set_dark_mode", { dark: !darkMode });
       pollMiniStats();

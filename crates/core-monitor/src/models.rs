@@ -93,5 +93,11 @@ pub struct MenuBarQuickStats {
     pub used_memory_bytes: u64,
     pub total_memory_bytes: u64,
     pub cpu_temp_c: f32,
+    #[serde(default)]
+    pub gpu_temp_c: f32,
+    #[serde(default)]
+    pub net_rx_bytes_per_sec: u64,
+    #[serde(default)]
+    pub net_tx_bytes_per_sec: u64,
 }
 

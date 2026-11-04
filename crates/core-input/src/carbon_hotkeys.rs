@@ -102,6 +102,13 @@ pub fn sync_feature_carbon_hotkeys() {
             !cfg.show_desktop_shortcut.trim().is_empty(),
             &cfg.show_desktop_shortcut,
         );
+
+        // Hotkey 8: Open / Toggle Main Dashboard (especially when Menu Bar is hidden in Background Mode)
+        register_if_active(
+            8,
+            !cfg.dashboard_shortcut.trim().is_empty(),
+            &cfg.dashboard_shortcut,
+        );
     }
 }
 
@@ -267,6 +274,11 @@ unsafe extern "C" fn carbon_hotkey_handler(
             7 => {
                 if !cfg.show_desktop_shortcut.trim().is_empty() {
                     trigger_system_action("show_desktop");
+                }
+            }
+            8 => {
+                if !cfg.dashboard_shortcut.trim().is_empty() {
+                    notify_overlay(UiOverlayEvent::ToggleMainDashboard);
                 }
             }
             99 => {

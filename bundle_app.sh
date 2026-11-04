@@ -21,10 +21,9 @@ if [[ -f "assets/AppIcon.icns" ]]; then
     cp "assets/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
 fi
 
-# Xóa các file binary rời cũ ngoài .app và bản trùng trong /Applications (nếu có) để Finder chỉ có duy nhất 1 app
+# Xóa các file binary rời cũ ngoài .app để Finder không bị trùng binary rời
 rm -f "target/release/mac-omni-tool"
 rm -f "target/debug/mac-omni-tool"
-rm -rf "/Applications/MacOmniTool.app" 2>/dev/null || true
 hdiutil detach "/Volumes/Mac Omni Tool Installer" -quiet 2>/dev/null || true
 
 cat > "$APP_DIR/Contents/Info.plist" << 'EOF'
@@ -63,11 +62,40 @@ cat > "$APP_DIR/Contents/Info.plist" << 'EOF'
 EOF
 
 touch "$APP_DIR"
-codesign --force --deep --sign - --identifier "com.khacthang.mac-omni-tool" "$APP_DIR" 2>/dev/null || true
+
+# Tự động dùng chứng chỉ Code Signing cố định trong Keychain (nếu có) hoặc ký với Designated Requirement theo Bundle ID
+# giúp macOS TCC giữ nguyên quyền Screen Recording & Accessibility qua các lần build/update mà không bị mất tên App.
+SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null | grep -E '"(Developer ID Application|Apple Development|Mac Developer|MacOmniTool)' | head -n 1 | awk '{print $2}')
+if [[ -z "$SIGN_ID" ]]; then
+    SIGN_ID="-"
+fi
+
+codesign --force --deep --sign "$SIGN_ID" \
+    --identifier "com.khacthang.mac-omni-tool" \
+    -r='designated => identifier "com.khacthang.mac-omni-tool"' \
+    "$APP_DIR" 2>/dev/null || true
+
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+if [[ -x "$LSREGISTER" ]]; then
+    "$LSREGISTER" -f "$(pwd)/$APP_DIR" 2>/dev/null || true
+fi
+
+# Nếu đã cài trong /Applications/MacOmniTool.app, cập nhật trực tiếp tại chỗ (in-place bằng ditto)
+# thay vì xóa đi để giữ nguyên Inode & quyền TCC của hệ thống.
+if [[ -d "/Applications/MacOmniTool.app" ]]; then
+    ditto "$APP_DIR" "/Applications/MacOmniTool.app" 2>/dev/null || true
+    codesign --force --deep --sign "$SIGN_ID" \
+        --identifier "com.khacthang.mac-omni-tool" \
+        -r='designated => identifier "com.khacthang.mac-omni-tool"' \
+        "/Applications/MacOmniTool.app" 2>/dev/null || true
+    if [[ -x "$LSREGISTER" ]]; then
+        "$LSREGISTER" -f "/Applications/MacOmniTool.app" 2>/dev/null || true
+    fi
+fi
 
 if [[ "$1" == "--reset-tcc" ]]; then
     tccutil reset Accessibility com.khacthang.mac-omni-tool 2>/dev/null || true
     tccutil reset ScreenCapture com.khacthang.mac-omni-tool 2>/dev/null || true
 fi
 
-echo "✅ Đã đóng gói thành công (duy nhất 1 bản .app) tại: $(pwd)/$APP_DIR"
+echo "✅ Đã đóng gói thành công tại: $(pwd)/$APP_DIR"

@@ -325,7 +325,7 @@ pub fn download_and_install_update(zip_url: &str, expected_sha256: &str) -> Resu
         return Err("Extracted archive does not contain MacOmniTool.app.".to_string());
     }
 
-    // 4. Remove quarantine flags & re-sign with stable bundle identifier
+    // 4. Remove quarantine flags & re-sign with stable bundle identifier + designated requirement
     let _ = Command::new("xattr")
         .arg("-cr")
         .arg(&extracted_app)
@@ -338,18 +338,21 @@ pub fn download_and_install_update(zip_url: &str, expected_sha256: &str) -> Resu
             "-",
             "--identifier",
             "com.khacthang.mac-omni-tool",
+            "-r=designated => identifier \"com.khacthang.mac-omni-tool\"",
         ])
         .arg(&extracted_app)
         .status();
 
-    // 5. Spawn detached shell script to swap the .app bundle & relaunch after this process exits
+    // 5. Spawn detached shell script to update the .app bundle in-place (via ditto to preserve TCC & bundle inode) & relaunch
     let script_path = staging_dir.join("apply_update.sh");
     let script_content = format!(
         "#!/usr/bin/env zsh\n\
          sleep 0.6\n\
-         rm -rf {target:?}\n\
-         mv {source:?} {target:?}\n\
+         mkdir -p {target:?}\n\
+         ditto {source:?} {target:?}\n\
          xattr -cr {target:?} 2>/dev/null || true\n\
+         codesign --force --deep --sign - --identifier \"com.khacthang.mac-omni-tool\" -r='designated => identifier \"com.khacthang.mac-omni-tool\"' {target:?} 2>/dev/null || true\n\
+         /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f {target:?} 2>/dev/null || true\n\
          touch {target:?}\n\
          open {target:?}\n\
          rm -rf {staging:?} 2>/dev/null || true\n",

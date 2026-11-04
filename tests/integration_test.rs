@@ -74,6 +74,9 @@ fn test_display_and_hardware_and_clipboard_and_cleaner() {
     assert!(input_cfg.scroll_step_px >= 15);
     assert!(input_cfg.scroll_duration_ms >= 80);
     assert!(!input_cfg.app_mouse_profiles.is_empty());
+    assert!(!input_cfg.menubar_display_mode.is_empty());
+    assert!(input_cfg.menubar_refresh_interval_sec >= 1 && input_cfg.menubar_refresh_interval_sec <= 60);
+    assert!(!input_cfg.dashboard_shortcut.is_empty());
     assert_eq!(
         input_cfg.resolve_mouse_button_action("com.google.Chrome", 4),
         "default"

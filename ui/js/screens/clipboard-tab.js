@@ -40,7 +40,7 @@ function createClipboardScreen() {
               <span class="slider-toggle"></span>
             </label>
           </div>
-          <button class="btn btn-sm btn-primary" id="btn-open-left-drawer">
+          <button class="btn btn-sm btn-primary" id="btn-open-left-drawer" ${enabled ? '' : 'disabled'}>
             ${t("clipboard.btn_open_drawer", { shortcut: escapeHtml(cfg.clipboard_popup_shortcut || 'Cmd+Shift+V') })}
           </button>
           <button class="btn btn-sm btn-danger" id="btn-clear-clips">${t("clipboard.clear_unpinned_btn")}</button>

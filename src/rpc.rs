@@ -152,6 +152,9 @@ pub fn handle_api_request(body: &[u8], proxy: &EventLoopProxy<AppUserEvent>) -> 
             let mut cfg = core_input::get_input_config();
             cfg.clipboard_enabled = enabled;
             let saved = core_input::update_input_config(cfg);
+            if !saved.clipboard_enabled {
+                let _ = proxy.send_event(AppUserEvent::HideClipboardDrawer);
+            }
             json!({ "ok": true, "enabled": saved.clipboard_enabled })
         }
         "copy_text" => {
@@ -185,10 +188,20 @@ pub fn handle_api_request(body: &[u8], proxy: &EventLoopProxy<AppUserEvent>) -> 
             json!({ "ok": true, "shortcuts": list })
         }
         "snap_window" => {
+            let cfg = core_input::get_input_config();
+            if !cfg.window_snapping_enabled {
+                return json!({ "ok": false, "error": "Tính năng Chia & Gắn cửa sổ đang tắt" });
+            }
             let layout = p
                 .get("layout")
                 .and_then(|v| v.as_str())
                 .unwrap_or("left_half");
+            if core_window::get_window_shortcuts()
+                .iter()
+                .any(|b| b.action == layout && !b.enabled)
+            {
+                return json!({ "ok": false, "error": "Bố cục cửa sổ này đang tắt" });
+            }
             let my_pid = std::process::id() as i32;
             if core_window::frontmost_application_pid() == my_pid {
                 let _ = proxy.send_event(AppUserEvent::SnapOwnMainWindow(layout.to_string()));
@@ -232,10 +245,66 @@ pub fn handle_api_request(body: &[u8], proxy: &EventLoopProxy<AppUserEvent>) -> 
             {
                 core_clipboard::set_clipboard_enabled(new_cfg.clipboard_enabled);
                 let saved = core_input::update_input_config(new_cfg);
+                if !saved.clipboard_enabled {
+                    let _ = proxy.send_event(AppUserEvent::HideClipboardDrawer);
+                }
+                if !saved.replace_macos_cmd_tab {
+                    let _ = proxy.send_event(AppUserEvent::HideAltTabOverlay);
+                }
+                if !saved.screenshot_enabled {
+                    let _ = proxy.send_event(AppUserEvent::HideScreenshotOverlay);
+                }
+                let _ = proxy.send_event(AppUserEvent::SyncMenuBarConfig);
                 serde_json::to_value(saved).unwrap_or_else(|_| json!({ "ok": true }))
             } else {
                 json!({ "ok": false, "error": "Invalid input config payload" })
             }
+        }
+        "update_menubar_config" => {
+            let mut cfg = core_input::get_input_config();
+            if let Some(enabled) = p.get("menubar_enabled").and_then(|v| v.as_bool()) {
+                cfg.menubar_enabled = enabled;
+                if enabled && cfg.menubar_display_mode == "hidden" {
+                    cfg.menubar_display_mode = "temp_cpu".to_string();
+                } else if !enabled {
+                    cfg.menubar_display_mode = "hidden".to_string();
+                }
+            }
+            if let Some(mode) = p.get("menubar_display_mode").and_then(|v| v.as_str()) {
+                cfg.menubar_display_mode = mode.to_string();
+                if mode == "hidden" {
+                    cfg.menubar_enabled = false;
+                } else if p.get("menubar_enabled").is_none() {
+                    cfg.menubar_enabled = true;
+                }
+            }
+            if let Some(icon) = p.get("menubar_icon").and_then(|v| v.as_str()) {
+                cfg.menubar_icon = icon.to_string();
+            }
+            if let Some(v) = p.get("menubar_show_temp").and_then(|v| v.as_bool()) {
+                cfg.menubar_show_temp = v;
+            }
+            if let Some(v) = p.get("menubar_show_cpu").and_then(|v| v.as_bool()) {
+                cfg.menubar_show_cpu = v;
+            }
+            if let Some(v) = p.get("menubar_show_ram").and_then(|v| v.as_bool()) {
+                cfg.menubar_show_ram = v;
+            }
+            if let Some(v) = p.get("menubar_show_net").and_then(|v| v.as_bool()) {
+                cfg.menubar_show_net = v;
+            }
+            if let Some(sec) = p.get("menubar_refresh_interval_sec").and_then(|v| v.as_u64()) {
+                cfg.menubar_refresh_interval_sec = (sec as u32).clamp(1, 30);
+            }
+            if let Some(bg) = p.get("keep_running_in_background").and_then(|v| v.as_bool()) {
+                cfg.keep_running_in_background = bg;
+            }
+            if let Some(sc) = p.get("dashboard_shortcut").and_then(|v| v.as_str()) {
+                cfg.dashboard_shortcut = sc.to_string();
+            }
+            let saved = core_input::update_input_config(cfg);
+            let _ = proxy.send_event(AppUserEvent::SyncMenuBarConfig);
+            json!({ "ok": true, "config": saved })
         }
         "get_mouse_state" => {
             let cfg = core_input::get_input_config();
@@ -248,9 +317,26 @@ pub fn handle_api_request(body: &[u8], proxy: &EventLoopProxy<AppUserEvent>) -> 
                 "running_apps": running_apps
             })
         }
+        "list_installed_mouse_apps" => {
+            let installed_apps = core_input::list_installed_gui_apps();
+            let running_apps = core_input::list_running_gui_apps();
+            json!({
+                "ok": true,
+                "installed_apps": installed_apps,
+                "running_apps": running_apps
+            })
+        }
+        "pick_mouse_app_dialog" => {
+            if let Some(app) = core_input::pick_application_bundle_dialog() {
+                json!({ "ok": true, "app": app })
+            } else {
+                json!({ "ok": false, "cancelled": true })
+            }
+        }
         "reset_mouse_profiles" => {
             let mut cfg = core_input::get_input_config();
             cfg.app_mouse_profiles = core_input::default_app_mouse_profiles();
+            cfg.mouse_profiles_v2_chrome_only = true;
             cfg.mouse_forward_action = "space_right".to_string();
             cfg.mouse_back_action = "space_left".to_string();
             cfg.mouse_middle_action = "default".to_string();
@@ -270,6 +356,9 @@ pub fn handle_api_request(body: &[u8], proxy: &EventLoopProxy<AppUserEvent>) -> 
         }
         "toggle_invert_mouse_scroll" => {
             let mut cfg = core_input::get_input_config();
+            if !cfg.external_mouse_enabled {
+                return json!({ "ok": false, "error": "Tối ưu Chuột rời đang tắt", "inverted": cfg.invert_external_mouse_scroll, "config": cfg });
+            }
             let next = p
                 .get("inverted")
                 .and_then(|v| v.as_bool())
@@ -280,6 +369,9 @@ pub fn handle_api_request(body: &[u8], proxy: &EventLoopProxy<AppUserEvent>) -> 
         }
         "toggle_smooth_scroll" => {
             let mut cfg = core_input::get_input_config();
+            if !cfg.external_mouse_enabled {
+                return json!({ "ok": false, "error": "Tối ưu Chuột rời đang tắt", "enabled": cfg.smooth_scroll_enabled, "config": cfg });
+            }
             let next = p
                 .get("enabled")
                 .and_then(|v| v.as_bool())
@@ -540,15 +632,25 @@ pub fn handle_api_request(body: &[u8], proxy: &EventLoopProxy<AppUserEvent>) -> 
             json!({ "ok": true })
         }
         "toggle_overlay" => {
+            let cfg = core_input::get_input_config();
             let w = p
                 .get("window")
                 .and_then(|v| v.as_str())
                 .unwrap_or("clipboard");
             if w == "alttab" {
+                if !cfg.replace_macos_cmd_tab {
+                    return json!({ "ok": false, "error": "Alt-Tab đang tắt" });
+                }
                 let _ = proxy.send_event(AppUserEvent::ToggleAltTabOverlay);
             } else if w == "screenshot" {
+                if !cfg.screenshot_enabled || !cfg.screenshot_region_enabled {
+                    return json!({ "ok": false, "error": "Chụp vùng chọn đang tắt" });
+                }
                 let _ = proxy.send_event(AppUserEvent::TriggerScreenshotOverlay);
             } else {
+                if !cfg.clipboard_enabled {
+                    return json!({ "ok": false, "error": "Lịch sử Clipboard đang tắt" });
+                }
                 let _ = proxy.send_event(AppUserEvent::ToggleClipboardDrawer);
             }
             json!({ "ok": true })
@@ -572,15 +674,26 @@ pub fn handle_api_request(body: &[u8], proxy: &EventLoopProxy<AppUserEvent>) -> 
         // Region Screenshot (Dual-Monitor), Fullscreen & Annotation
         // --------------------------------------------------------------------
         "trigger_screenshot" => {
+            let cfg = core_input::get_input_config();
+            if !cfg.screenshot_enabled || !cfg.screenshot_region_enabled {
+                return json!({ "ok": false, "error": "Chụp vùng chọn đang tắt" });
+            }
             let _ = proxy.send_event(AppUserEvent::TriggerScreenshotOverlay);
             json!({ "ok": true })
         }
         "trigger_fullscreen_screenshot" => {
+            let cfg = core_input::get_input_config();
             let display_id = p.get("display_id").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
             let instant_copy = p
                 .get("instant_copy")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
+            if !cfg.screenshot_enabled
+                || (instant_copy && !cfg.screenshot_fullscreen_copy_enabled)
+                || (!instant_copy && !cfg.screenshot_fullscreen_edit_enabled)
+            {
+                return json!({ "ok": false, "error": "Chế độ chụp màn hình này đang tắt" });
+            }
             let _ = proxy.send_event(AppUserEvent::TriggerFullscreenScreenshot {
                 display_id,
                 instant_copy,

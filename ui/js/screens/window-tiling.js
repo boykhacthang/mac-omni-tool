@@ -67,22 +67,22 @@ async function renderWindowTilingScreen(view) {
           </thead>
           <tbody>
             ${filteredBindings.map(b => `
-              <tr>
+              <tr style="${!b.enabled ? 'opacity:0.65;' : ''}">
                 <td style="font-weight:600;">${escapeHtml(tWindowActionLabel(b.action, b.label))}</td>
                 <td><span class="badge-ok">${escapeHtml(tWindowCategory(b.category))}</span></td>
                 <td>
-                  <div class="shortcut-recorder" data-action="${b.action}">
+                  <div class="shortcut-recorder" data-action="${b.action}" style="${snappingEnabled ? '' : 'pointer-events:none;opacity:0.6;'}">
                     ${b.shortcut ? escapeHtml(b.shortcut) : t("tiling.set_shortcut")}
                   </div>
                 </td>
                 <td>
                   <label class="switch">
-                    <input type="checkbox" class="toggle-shortcut-enable" data-action="${b.action}" data-shortcut="${escapeHtml(b.shortcut)}" ${b.enabled ? 'checked' : ''} />
+                    <input type="checkbox" class="toggle-shortcut-enable" data-action="${b.action}" data-shortcut="${escapeHtml(b.shortcut)}" ${b.enabled ? 'checked' : ''} ${snappingEnabled ? '' : 'disabled'} />
                     <span class="slider-toggle"></span>
                   </label>
                 </td>
                 <td style="text-align:right;">
-                  <button class="btn btn-sm btn-test-snap" data-action="${b.action}">▶️</button>
+                  <button class="btn btn-sm btn-test-snap" data-action="${b.action}" ${snappingEnabled && b.enabled ? '' : 'disabled'}>▶️</button>
                 </td>
               </tr>
             `).join("")}
@@ -116,6 +116,7 @@ async function renderWindowTilingScreen(view) {
 
   view.querySelectorAll(".shortcut-recorder").forEach(box => {
     box.addEventListener("click", () => {
+      if (!snappingEnabled) return;
       view.querySelectorAll(".shortcut-recorder").forEach(el => el.classList.remove("recording"));
       box.classList.add("recording");
       box.textContent = t("common.press_keys");
@@ -159,6 +160,7 @@ async function renderWindowTilingScreen(view) {
         shortcut: chk.dataset.shortcut,
         enabled: chk.checked
       });
+      renderWindowTilingScreen(view);
     });
   });
 

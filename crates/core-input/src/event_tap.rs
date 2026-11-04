@@ -287,6 +287,13 @@ unsafe extern "C" fn event_tap_callback(
                     return std::ptr::null_mut();
                 }
 
+                if !cfg.dashboard_shortcut.trim().is_empty()
+                    && shortcuts_match(&combo, &cfg.dashboard_shortcut)
+                {
+                    notify_overlay(UiOverlayEvent::ToggleMainDashboard);
+                    return std::ptr::null_mut();
+                }
+
                 if cfg.window_snapping_enabled {
                     let bindings = core_window::get_window_shortcuts();
                     for b in bindings {

@@ -4,13 +4,30 @@
 let settingsSubTab = "shortcuts";
 
 async function renderUnifiedSettingsScreen(view) {
-  const [cfg, auto, perms, dispState] = await Promise.all([
+  const [cfg, auto, perms, dispState, mbStats] = await Promise.all([
     api("get_input_config"),
     api("get_autostart_status"),
     api("get_permissions_status"),
-    api("get_display_state")
+    api("get_display_state"),
+    api("get_menubar_stats").catch(() => null)
   ]);
   const displays = (dispState && dispState.displays) ? dispState.displays : [];
+  const shotMaster = cfg.screenshot_enabled !== false;
+  const shotRegion = shotMaster && cfg.screenshot_region_enabled !== false;
+  const shotFullEdit = shotMaster && cfg.screenshot_fullscreen_edit_enabled !== false;
+  const shotFullCopy = shotMaster && cfg.screenshot_fullscreen_copy_enabled !== false;
+  const clipEnabled = cfg.clipboard_enabled !== false;
+  const altTabEnabled = cfg.replace_macos_cmd_tab !== false;
+  const extMouseEnabled = cfg.external_mouse_enabled !== false;
+  const mouseChordEnabled = extMouseEnabled && !!cfg.mouse_chord_enabled;
+  const mcEnabled = !!cfg.mission_control_shortcut;
+
+  const menubarVisible = cfg.menubar_enabled !== false && cfg.menubar_display_mode !== "hidden";
+  const menubarMode = cfg.menubar_display_mode || "temp_cpu";
+  const menubarIcon = cfg.menubar_icon || "❖";
+  const menubarInterval = Number(cfg.menubar_refresh_interval_sec || 3);
+  const keepBg = cfg.keep_running_in_background !== false;
+  const mbPreviewText = formatMenuBarTitlePreview(cfg, mbStats);
 
   view.innerHTML = `
     <div class="page-header">
@@ -39,14 +56,138 @@ async function renderUnifiedSettingsScreen(view) {
       </div>
       <div class="subtab-bar-right">
         ${settingsSubTab === 'shortcuts' ? `
-          <button class="btn btn-sm btn-primary" id="btn-test-screenshot">
+          <button class="btn btn-sm btn-primary" id="btn-test-screenshot" ${shotRegion ? '' : 'disabled'}>
             ${t("settings.btn_test_screenshot", { shortcut: escapeHtml(cfg.screenshot_shortcut || 'Cmd+Shift+0') })}
           </button>
-          <button class="btn btn-sm" id="btn-test-mc">${t("settings.btn_test_f3")}</button>
-          <button class="btn btn-sm" id="btn-launch-alttab-hud">${t("settings.btn_test_alttab")}</button>
+          <button class="btn btn-sm" id="btn-test-mc" ${mcEnabled ? '' : 'disabled'}>${t("settings.btn_test_f3")}</button>
+          <button class="btn btn-sm" id="btn-launch-alttab-hud" ${altTabEnabled ? '' : 'disabled'}>${t("settings.btn_test_alttab")}</button>
         ` : `
           <button class="btn btn-sm btn-primary" id="btn-reset-tcc">${t("settings.btn_refresh_perms")}</button>
         `}
+      </div>
+    </div>
+
+    <!-- MENU BAR & BACKGROUND MODE SETTINGS CARD -->
+    <div class="card" style="margin-bottom:10px;border:1px solid rgba(59,130,246,0.28);">
+      <div class="card-header" style="margin-bottom:6px;flex-wrap:wrap;gap:8px;">
+        <div class="card-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span>${t("settings.menubar_card_title")}</span>
+          ${renderTip(t("settings.menubar_card_tip"))}
+          ${menubarVisible ? `
+            <span class="badge-ok" style="font-family:monospace;font-size:11.5px;padding:2px 9px;" title="${t('settings.menubar_live_preview_tip')}">
+              ${escapeHtml(mbPreviewText || "❖")}
+            </span>
+          ` : `
+            <span class="badge-warn" style="font-size:11px;padding:2px 9px;">
+              ${t("settings.menubar_badge_hidden")}
+            </span>
+          `}
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-sm" id="btn-hide-to-background-now" title="${t('settings.btn_hide_bg_tip')}">
+            ${t("settings.btn_hide_bg_now")}
+          </button>
+          <span class="stat-sub">${t("settings.menubar_show_label")}</span>
+          <label class="switch" title="${t('settings.menubar_show_tip')}">
+            <input type="checkbox" id="chk-menubar-enabled" ${menubarVisible ? 'checked' : ''} />
+            <span class="slider-toggle"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="grid-2" style="gap:10px;">
+        <!-- LEFT COLUMN: MENU BAR DISPLAY OPTIONS -->
+        <div style="padding:6px 10px;border-radius:8px;background:var(--bg-input);border:1px solid var(--border);${menubarVisible ? '' : 'opacity:0.65;'}">
+          <div class="setting-row" style="padding:4px 0;border-bottom:1px solid var(--border);">
+            <div style="display:flex;flex-direction:column;gap:1px;">
+              <span style="font-size:12px;font-weight:600;">${t("settings.menubar_mode_label")}</span>
+              <span style="font-size:10.5px;color:var(--text-muted);">${t("settings.menubar_mode_sub")}</span>
+            </div>
+            <select class="select-box" id="sel-menubar-mode" style="min-width:215px;">
+              <option value="temp_cpu" ${menubarMode === 'temp_cpu' ? 'selected' : ''}>${t("menubar.mode.temp_cpu")}</option>
+              <option value="temp_cpu_ram" ${menubarMode === 'temp_cpu_ram' ? 'selected' : ''}>${t("menubar.mode.temp_cpu_ram")}</option>
+              <option value="cpu_ram" ${menubarMode === 'cpu_ram' ? 'selected' : ''}>${t("menubar.mode.cpu_ram")}</option>
+              <option value="cpu_only" ${menubarMode === 'cpu_only' ? 'selected' : ''}>${t("menubar.mode.cpu_only")}</option>
+              <option value="temp_only" ${menubarMode === 'temp_only' ? 'selected' : ''}>${t("menubar.mode.temp_only")}</option>
+              <option value="ram_only" ${menubarMode === 'ram_only' ? 'selected' : ''}>${t("menubar.mode.ram_only")}</option>
+              <option value="ram_gb" ${menubarMode === 'ram_gb' ? 'selected' : ''}>${t("menubar.mode.ram_gb")}</option>
+              <option value="net_speed" ${menubarMode === 'net_speed' ? 'selected' : ''}>${t("menubar.mode.net_speed")}</option>
+              <option value="temp_net" ${menubarMode === 'temp_net' ? 'selected' : ''}>${t("menubar.mode.temp_net")}</option>
+              <option value="icon_only" ${menubarMode === 'icon_only' ? 'selected' : ''}>${t("menubar.mode.icon_only")}</option>
+              <option value="icon_name" ${menubarMode === 'icon_name' ? 'selected' : ''}>${t("menubar.mode.icon_name")}</option>
+              <option value="custom" ${menubarMode === 'custom' ? 'selected' : ''}>${t("menubar.mode.custom")}</option>
+              <option value="hidden" ${!menubarVisible || menubarMode === 'hidden' ? 'selected' : ''}>${t("menubar.mode.hidden")}</option>
+            </select>
+          </div>
+
+          ${menubarMode === 'custom' && menubarVisible ? `
+            <div class="setting-row" style="padding:5px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:8px;">
+              <span style="font-size:11.5px;font-weight:600;color:var(--accent);">${t("settings.menubar_custom_items")}</span>
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:11.5px;">
+                <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;">
+                  <input type="checkbox" id="chk-mb-temp" ${cfg.menubar_show_temp !== false ? 'checked' : ''} />
+                  <span>🌡️ Temp (°C)</span>
+                </label>
+                <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;">
+                  <input type="checkbox" id="chk-mb-cpu" ${cfg.menubar_show_cpu !== false ? 'checked' : ''} />
+                  <span>⚡ % CPU</span>
+                </label>
+                <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;">
+                  <input type="checkbox" id="chk-mb-ram" ${cfg.menubar_show_ram ? 'checked' : ''} />
+                  <span>🧠 % RAM</span>
+                </label>
+                <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;">
+                  <input type="checkbox" id="chk-mb-net" ${cfg.menubar_show_net ? 'checked' : ''} />
+                  <span>🌐 Net ↓↑</span>
+                </label>
+              </div>
+            </div>
+          ` : ''}
+
+          <div class="setting-row" style="padding:4px 0;">
+            <span style="font-size:11.5px;font-weight:500;">${t("settings.menubar_icon_and_interval")}</span>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <select class="select-box" id="sel-menubar-icon" style="min-width:110px;" ${menubarVisible ? '' : 'disabled'}>
+                <option value="❖" ${menubarIcon === '❖' ? 'selected' : ''}>❖ ${t("menubar.icon.diamond")}</option>
+                <option value="⌘" ${menubarIcon === '⌘' ? 'selected' : ''}>⌘ Command</option>
+                <option value="⚡" ${menubarIcon === '⚡' ? 'selected' : ''}>⚡ ${t("menubar.icon.bolt")}</option>
+                <option value="🖥️" ${menubarIcon === '🖥️' ? 'selected' : ''}>🖥️ Mac</option>
+                <option value="🎛️" ${menubarIcon === '🎛️' ? 'selected' : ''}>🎛️ Studio</option>
+                <option value="🟢" ${menubarIcon === '🟢' ? 'selected' : ''}>🟢 Dot</option>
+                <option value="none" ${menubarIcon === 'none' ? 'selected' : ''}>🚫 ${t("menubar.icon.none")}</option>
+              </select>
+              <select class="select-box" id="sel-menubar-interval" style="min-width:95px;" ${menubarVisible ? '' : 'disabled'} title="${t('settings.menubar_interval_tip')}">
+                <option value="1" ${menubarInterval === 1 ? 'selected' : ''}>1s</option>
+                <option value="2" ${menubarInterval === 2 ? 'selected' : ''}>2s</option>
+                <option value="3" ${menubarInterval === 3 ? 'selected' : ''}>3s (${t("common.active")})</option>
+                <option value="5" ${menubarInterval === 5 ? 'selected' : ''}>5s</option>
+                <option value="10" ${menubarInterval === 10 ? 'selected' : ''}>10s (Eco)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT COLUMN: BACKGROUND MODE & DASHBOARD HOTKEY -->
+        <div style="padding:6px 10px;border-radius:8px;background:var(--bg-input);border:1px solid var(--border);">
+          <div class="setting-row" style="padding:4px 0;border-bottom:1px solid var(--border);">
+            <div style="display:flex;flex-direction:column;gap:1px;">
+              <span style="font-size:12px;font-weight:600;">${t("settings.bg_mode_title")}</span>
+              <span style="font-size:10.5px;color:var(--text-muted);">${t("settings.bg_mode_sub")}</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="chk-keep-background" ${keepBg ? 'checked' : ''} />
+              <span class="slider-toggle"></span>
+            </label>
+          </div>
+
+          <div class="setting-row" style="padding:4px 0;">
+            <div style="display:flex;flex-direction:column;gap:1px;">
+              <span style="font-size:12px;font-weight:600;color:var(--accent);">${t("settings.dashboard_shortcut_title")}</span>
+              <span style="font-size:10.5px;color:var(--text-muted);">${t("settings.dashboard_shortcut_sub")}</span>
+            </div>
+            <div class="shortcut-recorder sys-shortcut" data-field="dashboard_shortcut">${escapeHtml(cfg.dashboard_shortcut || 'Cmd+Shift+M')}</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -83,7 +224,7 @@ async function renderUnifiedSettingsScreen(view) {
             </div>
           </div>
 
-          <div style="padding:6px 10px;margin:6px 0;border-radius:8px;background:var(--bg-input);border:1px solid var(--border);">
+          <div style="padding:6px 10px;margin:6px 0;border-radius:8px;background:var(--bg-input);border:1px solid var(--border);${shotMaster ? '' : 'opacity:0.55;'}">
             <!-- Mode 1: Region Capture -->
             <div class="setting-row" style="padding:4px 0;border-bottom:1px solid var(--border);">
               <div style="display:flex;flex-direction:column;gap:1px;">
@@ -91,10 +232,10 @@ async function renderUnifiedSettingsScreen(view) {
                 <span style="font-size:10.5px;color:var(--text-muted);">${t("settings.mode1_sub")}</span>
               </div>
               <div style="display:flex;align-items:center;gap:6px;">
-                <button class="btn btn-sm" id="btn-try-shot-region" title="${t('settings.tip_test_mode1')}">${t("common.test")}</button>
-                <div class="shortcut-recorder sys-shortcut" data-field="screenshot_shortcut">${escapeHtml(cfg.screenshot_shortcut || 'Cmd+Shift+0')}</div>
+                <button class="btn btn-sm" id="btn-try-shot-region" title="${t('settings.tip_test_mode1')}" ${shotRegion ? '' : 'disabled'}>${t("common.test")}</button>
+                <div class="shortcut-recorder sys-shortcut" data-field="screenshot_shortcut" style="${shotRegion ? '' : 'pointer-events:none;opacity:0.6;'}">${escapeHtml(cfg.screenshot_shortcut || 'Cmd+Shift+0')}</div>
                 <label class="switch">
-                  <input type="checkbox" id="chk-shot-region-enabled" ${cfg.screenshot_region_enabled !== false ? 'checked' : ''} />
+                  <input type="checkbox" id="chk-shot-region-enabled" ${cfg.screenshot_region_enabled !== false ? 'checked' : ''} ${shotMaster ? '' : 'disabled'} />
                   <span class="slider-toggle"></span>
                 </label>
               </div>
@@ -107,10 +248,10 @@ async function renderUnifiedSettingsScreen(view) {
                 <span style="font-size:10.5px;color:var(--text-muted);">${t("settings.mode2_sub")}</span>
               </div>
               <div style="display:flex;align-items:center;gap:6px;">
-                <button class="btn btn-sm" id="btn-try-shot-fulledit" title="${t('settings.tip_test_mode2')}">${t("common.test")}</button>
-                <div class="shortcut-recorder sys-shortcut" data-field="screenshot_fullscreen_edit_shortcut">${escapeHtml(cfg.screenshot_fullscreen_edit_shortcut || 'Cmd+Shift+9')}</div>
+                <button class="btn btn-sm" id="btn-try-shot-fulledit" title="${t('settings.tip_test_mode2')}" ${shotFullEdit ? '' : 'disabled'}>${t("common.test")}</button>
+                <div class="shortcut-recorder sys-shortcut" data-field="screenshot_fullscreen_edit_shortcut" style="${shotFullEdit ? '' : 'pointer-events:none;opacity:0.6;'}">${escapeHtml(cfg.screenshot_fullscreen_edit_shortcut || 'Cmd+Shift+9')}</div>
                 <label class="switch">
-                  <input type="checkbox" id="chk-shot-fulledit-enabled" ${cfg.screenshot_fullscreen_edit_enabled !== false ? 'checked' : ''} />
+                  <input type="checkbox" id="chk-shot-fulledit-enabled" ${cfg.screenshot_fullscreen_edit_enabled !== false ? 'checked' : ''} ${shotMaster ? '' : 'disabled'} />
                   <span class="slider-toggle"></span>
                 </label>
               </div>
@@ -123,10 +264,10 @@ async function renderUnifiedSettingsScreen(view) {
                 <span style="font-size:10.5px;color:var(--text-muted);">${t("settings.mode3_sub")}</span>
               </div>
               <div style="display:flex;align-items:center;gap:6px;">
-                <button class="btn btn-sm" id="btn-try-shot-fullcopy" title="${t('settings.tip_test_mode3')}">${t("common.test")}</button>
-                <div class="shortcut-recorder sys-shortcut" data-field="screenshot_fullscreen_copy_shortcut">${escapeHtml(cfg.screenshot_fullscreen_copy_shortcut || 'Cmd+Shift+8')}</div>
+                <button class="btn btn-sm" id="btn-try-shot-fullcopy" title="${t('settings.tip_test_mode3')}" ${shotFullCopy ? '' : 'disabled'}>${t("common.test")}</button>
+                <div class="shortcut-recorder sys-shortcut" data-field="screenshot_fullscreen_copy_shortcut" style="${shotFullCopy ? '' : 'pointer-events:none;opacity:0.6;'}">${escapeHtml(cfg.screenshot_fullscreen_copy_shortcut || 'Cmd+Shift+8')}</div>
                 <label class="switch">
-                  <input type="checkbox" id="chk-shot-fullcopy-enabled" ${cfg.screenshot_fullscreen_copy_enabled !== false ? 'checked' : ''} />
+                  <input type="checkbox" id="chk-shot-fullcopy-enabled" ${cfg.screenshot_fullscreen_copy_enabled !== false ? 'checked' : ''} ${shotMaster ? '' : 'disabled'} />
                   <span class="slider-toggle"></span>
                 </label>
               </div>
@@ -150,7 +291,7 @@ async function renderUnifiedSettingsScreen(view) {
           <div class="setting-row" style="border-bottom:1px solid var(--border);">
             <span style="font-weight:500;">📋 Clipboard</span>
             <div style="display:flex;align-items:center;gap:8px;">
-              <div class="shortcut-recorder sys-shortcut" data-field="clipboard_popup_shortcut">${escapeHtml(cfg.clipboard_popup_shortcut || 'Cmd+Shift+V')}</div>
+              <div class="shortcut-recorder sys-shortcut" data-field="clipboard_popup_shortcut" style="${clipEnabled ? '' : 'pointer-events:none;opacity:0.6;'}">${escapeHtml(cfg.clipboard_popup_shortcut || 'Cmd+Shift+V')}</div>
               <label class="switch">
                 <input type="checkbox" id="chk-clipboard-enabled" ${cfg.clipboard_enabled !== false ? 'checked' : ''} />
                 <span class="slider-toggle"></span>
@@ -164,7 +305,7 @@ async function renderUnifiedSettingsScreen(view) {
               ${renderTip(t("settings.alttab_tip"))}
             </span>
             <div style="display:flex;align-items:center;gap:8px;">
-              <div class="shortcut-recorder sys-shortcut" data-field="alt_tab_shortcut">${escapeHtml(cfg.alt_tab_shortcut || 'Cmd+Tab')}</div>
+              <div class="shortcut-recorder sys-shortcut" data-field="alt_tab_shortcut" style="${altTabEnabled ? '' : 'pointer-events:none;opacity:0.6;'}">${escapeHtml(cfg.alt_tab_shortcut || 'Cmd+Tab')}</div>
               <label class="switch">
                 <input type="checkbox" id="chk-replace-cmdtab" ${cfg.replace_macos_cmd_tab !== false ? 'checked' : ''} />
                 <span class="slider-toggle"></span>
@@ -204,26 +345,26 @@ async function renderUnifiedSettingsScreen(view) {
             </label>
           </div>
 
-          <div class="setting-row" style="border-bottom:1px solid var(--border);">
+          <div class="setting-row" style="border-bottom:1px solid var(--border);${extMouseEnabled ? '' : 'opacity:0.55;'}">
             <span>${t("settings.reverse_mouse_scroll")}</span>
             <label class="switch">
-              <input type="checkbox" id="chk-settings-invert-scroll" ${cfg.invert_external_mouse_scroll ? 'checked' : ''} />
+              <input type="checkbox" id="chk-settings-invert-scroll" ${cfg.invert_external_mouse_scroll ? 'checked' : ''} ${extMouseEnabled ? '' : 'disabled'} />
               <span class="slider-toggle"></span>
             </label>
           </div>
 
-          <div class="setting-row" style="border-bottom:1px solid var(--border);">
+          <div class="setting-row" style="border-bottom:1px solid var(--border);${extMouseEnabled ? '' : 'opacity:0.55;'}">
             <span>${t("settings.smooth_scroll_120hz")}</span>
             <label class="switch">
-              <input type="checkbox" id="chk-settings-smooth-scroll" ${cfg.smooth_scroll_enabled !== false ? 'checked' : ''} />
+              <input type="checkbox" id="chk-settings-smooth-scroll" ${cfg.smooth_scroll_enabled !== false ? 'checked' : ''} ${extMouseEnabled ? '' : 'disabled'} />
               <span class="slider-toggle"></span>
             </label>
           </div>
 
-          <div class="setting-row" style="border-bottom:1px solid var(--border);">
+          <div class="setting-row" style="border-bottom:1px solid var(--border);${extMouseEnabled ? '' : 'opacity:0.55;'}">
             <span>${t("settings.left_right_chord")}</span>
             <div style="display:flex;align-items:center;gap:8px;">
-              <select class="select-box" id="sel-mouse-action" style="min-width:150px;">
+              <select class="select-box" id="sel-mouse-action" style="min-width:150px;" ${mouseChordEnabled ? '' : 'disabled'}>
                 <option value="mission_control" ${cfg.mouse_chord_action === 'mission_control' ? 'selected' : ''}>🚀 Mission Control (F3)</option>
                 <option value="app_expose" ${cfg.mouse_chord_action === 'app_expose' ? 'selected' : ''}>🪟 App Exposé</option>
                 <option value="show_desktop" ${cfg.mouse_chord_action === 'show_desktop' ? 'selected' : ''}>${t("settings.chord_show_desktop")}</option>
@@ -231,30 +372,31 @@ async function renderUnifiedSettingsScreen(view) {
                 <option value="clipboard_popup" ${cfg.mouse_chord_action === 'clipboard_popup' ? 'selected' : ''}>${t("settings.chord_clipboard")}</option>
                 <option value="alt_tab" ${cfg.mouse_chord_action === 'alt_tab' ? 'selected' : ''}>🪟 Alt-Tab</option>
                 <option value="screenshot" ${cfg.mouse_chord_action === 'screenshot' ? 'selected' : ''}>${t("settings.chord_screenshot")}</option>
+                <option value="open_dashboard" ${cfg.mouse_chord_action === 'open_dashboard' ? 'selected' : ''}>${t("settings.chord_open_dashboard")}</option>
               </select>
               <label class="switch">
-                <input type="checkbox" id="chk-mouse-chord" ${cfg.mouse_chord_enabled ? 'checked' : ''} />
+                <input type="checkbox" id="chk-mouse-chord" ${cfg.mouse_chord_enabled ? 'checked' : ''} ${extMouseEnabled ? '' : 'disabled'} />
                 <span class="slider-toggle"></span>
               </label>
             </div>
           </div>
 
-          <div style="padding:8px 0;border-bottom:1px solid var(--border);">
+          <div style="padding:8px 0;border-bottom:1px solid var(--border);${mouseChordEnabled ? '' : 'opacity:0.55;'}">
             <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
               <span>${t("settings.chord_sensitivity")}</span>
               <b id="lbl-chord-ms">${cfg.mouse_chord_threshold_ms} ms</b>
             </div>
-            <input type="range" min="50" max="250" step="10" value="${cfg.mouse_chord_threshold_ms}" id="slider-chord-ms" />
+            <input type="range" min="50" max="250" step="10" value="${cfg.mouse_chord_threshold_ms}" id="slider-chord-ms" ${mouseChordEnabled ? '' : 'disabled'} />
           </div>
 
           <div class="setting-row" style="border-bottom:1px solid var(--border);">
             <span>${t("settings.f3_key_label")}</span>
-            <div class="shortcut-recorder sys-shortcut" data-field="mission_control_shortcut">${escapeHtml(cfg.mission_control_shortcut)}</div>
+            <div class="shortcut-recorder sys-shortcut" data-field="mission_control_shortcut">${cfg.mission_control_shortcut ? escapeHtml(cfg.mission_control_shortcut) : t("tiling.set_shortcut")}</div>
           </div>
 
           <div class="setting-row">
             <span>${t("settings.show_desktop_key_label")}</span>
-            <div class="shortcut-recorder sys-shortcut" data-field="show_desktop_shortcut">${escapeHtml(cfg.show_desktop_shortcut)}</div>
+            <div class="shortcut-recorder sys-shortcut" data-field="show_desktop_shortcut">${cfg.show_desktop_shortcut ? escapeHtml(cfg.show_desktop_shortcut) : t("tiling.set_shortcut")}</div>
           </div>
         </div>
       </div>
@@ -281,10 +423,10 @@ async function renderUnifiedSettingsScreen(view) {
             </label>
           </div>
 
-          <div class="setting-row">
+          <div class="setting-row" style="${auto.enabled ? '' : 'opacity:0.55;'}">
             <span>${t("settings.start_minimized")}</span>
             <label class="switch">
-              <input type="checkbox" id="chk-autostart-min" ${auto.start_minimized ? 'checked' : ''} />
+              <input type="checkbox" id="chk-autostart-min" ${auto.start_minimized ? 'checked' : ''} ${auto.enabled ? '' : 'disabled'} />
               <span class="slider-toggle"></span>
             </label>
           </div>
@@ -411,6 +553,13 @@ async function renderUnifiedSettingsScreen(view) {
       return el ? Number(el.value) : fallback;
     };
 
+    const selectedMbMode = selVal("sel-menubar-mode", cfg.menubar_display_mode || "temp_cpu");
+    const mbSwitchChecked = chkVal("chk-menubar-enabled", cfg.menubar_enabled !== false);
+    const effectiveMbEnabled = mbSwitchChecked && selectedMbMode !== "hidden";
+    const effectiveMbMode = !effectiveMbEnabled
+      ? "hidden"
+      : (selectedMbMode === "hidden" ? "temp_cpu" : selectedMbMode);
+
     const updated = {
       ...cfg,
       screenshot_enabled: chkVal("chk-screenshot-enabled", cfg.screenshot_enabled !== false),
@@ -428,6 +577,15 @@ async function renderUnifiedSettingsScreen(view) {
       mouse_chord_enabled: chkVal("chk-mouse-chord", !!cfg.mouse_chord_enabled),
       mouse_chord_action: selVal("sel-mouse-action", cfg.mouse_chord_action),
       mouse_chord_threshold_ms: numVal("slider-chord-ms", cfg.mouse_chord_threshold_ms),
+      menubar_enabled: effectiveMbEnabled,
+      menubar_display_mode: effectiveMbMode,
+      menubar_icon: selVal("sel-menubar-icon", cfg.menubar_icon || "❖"),
+      menubar_show_temp: chkVal("chk-mb-temp", cfg.menubar_show_temp !== false),
+      menubar_show_cpu: chkVal("chk-mb-cpu", cfg.menubar_show_cpu !== false),
+      menubar_show_ram: chkVal("chk-mb-ram", !!cfg.menubar_show_ram),
+      menubar_show_net: chkVal("chk-mb-net", !!cfg.menubar_show_net),
+      menubar_refresh_interval_sec: numVal("sel-menubar-interval", cfg.menubar_refresh_interval_sec || 3),
+      keep_running_in_background: chkVal("chk-keep-background", cfg.keep_running_in_background !== false),
       ...patch
     };
     await api("update_input_config", updated);
@@ -456,6 +614,32 @@ async function renderUnifiedSettingsScreen(view) {
   bindChange("chk-settings-ext-mouse", () => saveCfg());
   bindChange("chk-settings-invert-scroll", () => saveCfg());
   bindChange("chk-settings-smooth-scroll", () => saveCfg());
+
+  bindChange("chk-menubar-enabled", (e) => {
+    const enabled = e.target.checked;
+    const nextMode = enabled
+      ? ((cfg.menubar_display_mode && cfg.menubar_display_mode !== "hidden") ? cfg.menubar_display_mode : "temp_cpu")
+      : "hidden";
+    saveCfg({ menubar_enabled: enabled, menubar_display_mode: nextMode });
+  });
+  bindChange("sel-menubar-mode", (e) => {
+    const val = e.target.value;
+    if (val === "hidden") {
+      saveCfg({ menubar_enabled: false, menubar_display_mode: "hidden" });
+    } else {
+      saveCfg({ menubar_enabled: true, menubar_display_mode: val });
+    }
+  });
+  bindChange("sel-menubar-icon", () => saveCfg());
+  bindChange("sel-menubar-interval", () => saveCfg());
+  bindChange("chk-mb-temp", () => saveCfg());
+  bindChange("chk-mb-cpu", () => saveCfg());
+  bindChange("chk-mb-ram", () => saveCfg());
+  bindChange("chk-mb-net", () => saveCfg());
+  bindChange("chk-keep-background", () => saveCfg());
+  bindClick("btn-hide-to-background-now", () => {
+    api("hide_launcher");
+  });
 
   bindClick("btn-test-screenshot", () => api("trigger_screenshot"));
   bindClick("btn-try-shot-region", () => api("trigger_screenshot"));
@@ -496,6 +680,12 @@ async function renderUnifiedSettingsScreen(view) {
         if (e.key === "Escape") {
           window.removeEventListener("keydown", handler, true);
           renderUnifiedSettingsScreen(view);
+          return;
+        }
+        if (e.key === "Backspace" || e.key === "Delete") {
+          e.preventDefault();
+          window.removeEventListener("keydown", handler, true);
+          await saveCfg({ [box.dataset.field]: "" });
           return;
         }
         const combo = eventToShortcutString(e);

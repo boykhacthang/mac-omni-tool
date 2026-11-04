@@ -14,6 +14,10 @@ struct MonitorState {
     disks: Disks,
     networks: Networks,
     last_net_check: Instant,
+    cached_net_rx_rate: u64,
+    cached_net_tx_rate: u64,
+    cached_total_rx: u64,
+    cached_total_tx: u64,
     last_battery_check: Instant,
     cached_battery: Option<BatteryInfo>,
 }
@@ -33,16 +37,49 @@ fn get_monitor() -> &'static Mutex<MonitorState> {
             disks,
             networks,
             last_net_check: Instant::now(),
+            cached_net_rx_rate: 0,
+            cached_net_tx_rate: 0,
+            cached_total_rx: 0,
+            cached_total_tx: 0,
             last_battery_check: Instant::now(),
             cached_battery: None,
         })
     })
 }
 
+fn refresh_network_rates(guard: &mut MonitorState) -> (u64, u64, u64, u64) {
+    let elapsed_secs = guard.last_net_check.elapsed().as_secs_f64();
+    if elapsed_secs >= 0.75 || (guard.cached_total_rx == 0 && guard.cached_total_tx == 0) {
+        let dt = elapsed_secs.max(0.25);
+        guard.last_net_check = Instant::now();
+        guard.networks.refresh();
+        let mut rx_delta = 0u64;
+        let mut tx_delta = 0u64;
+        let mut total_rx = 0u64;
+        let mut total_tx = 0u64;
+        for (_name, net) in &guard.networks {
+            rx_delta += net.received();
+            tx_delta += net.transmitted();
+            total_rx += net.total_received();
+            total_tx += net.total_transmitted();
+        }
+        guard.cached_net_rx_rate = (rx_delta as f64 / dt) as u64;
+        guard.cached_net_tx_rate = (tx_delta as f64 / dt) as u64;
+        guard.cached_total_rx = total_rx;
+        guard.cached_total_tx = total_tx;
+    }
+    (
+        guard.cached_net_rx_rate,
+        guard.cached_net_tx_rate,
+        guard.cached_total_rx,
+        guard.cached_total_tx,
+    )
+}
+
 /// Ultra-lightweight stats poll for the Menu Bar status item (`❖`).
-/// Refreshes only global CPU, RAM, and CPU temperature without enumerating processes or spawning external commands.
+/// Refreshes only global CPU, RAM, Network I/O, and CPU/GPU temperature without enumerating processes or spawning external commands.
 pub fn get_menubar_stats() -> MenuBarQuickStats {
-    let (cpu_usage, used_mem, total_mem, mem_pct) = {
+    let (cpu_usage, used_mem, total_mem, mem_pct, net_rx, net_tx) = {
         let mut guard = get_monitor().lock().unwrap();
         guard.sys.refresh_cpu_usage();
         guard.sys.refresh_memory();
@@ -52,7 +89,15 @@ pub fn get_menubar_stats() -> MenuBarQuickStats {
             .saturating_sub(avail_mem)
             .max(guard.sys.used_memory());
         let mem_pct = ((used_mem as f64 / total_mem as f64) * 100.0) as f32;
-        (guard.sys.global_cpu_usage(), used_mem, total_mem, mem_pct)
+        let (rx_rate, tx_rate, _, _) = refresh_network_rates(&mut guard);
+        (
+            guard.sys.global_cpu_usage(),
+            used_mem,
+            total_mem,
+            mem_pct,
+            rx_rate,
+            tx_rate,
+        )
     };
     let temps = read_hardware_temperatures();
     MenuBarQuickStats {
@@ -61,6 +106,9 @@ pub fn get_menubar_stats() -> MenuBarQuickStats {
         used_memory_bytes: used_mem,
         total_memory_bytes: total_mem,
         cpu_temp_c: temps.cpu_temp_c,
+        gpu_temp_c: temps.gpu_temp_c,
+        net_rx_bytes_per_sec: net_rx,
+        net_tx_bytes_per_sec: net_tx,
     }
 }
 
@@ -68,8 +116,6 @@ pub fn get_menubar_stats() -> MenuBarQuickStats {
 /// Automatically purges dead processes on every tick so RAM usage never grows over time.
 pub fn get_hardware_dashboard(sort_by: &str, limit: usize) -> HardwareDashboardData {
     let mut guard = get_monitor().lock().unwrap();
-    let elapsed_secs = guard.last_net_check.elapsed().as_secs_f64().max(0.25);
-    guard.last_net_check = Instant::now();
 
     guard.sys.refresh_cpu_all();
     guard.sys.refresh_memory();
@@ -78,7 +124,6 @@ pub fn get_hardware_dashboard(sort_by: &str, limit: usize) -> HardwareDashboardD
         .sys
         .refresh_processes_specifics(ProcessesToUpdate::All, light_process_refresh_kind());
     guard.disks.refresh();
-    guard.networks.refresh();
 
     let total_mem = guard.sys.total_memory().max(1);
     let avail_mem = guard.sys.available_memory();
@@ -109,18 +154,7 @@ pub fn get_hardware_dashboard(sort_by: &str, limit: usize) -> HardwareDashboardD
     let disk_pct = ((disk_used as f64 / disk_total.max(1) as f64) * 100.0) as f32;
 
     // Network totals & rates
-    let mut rx_delta = 0u64;
-    let mut tx_delta = 0u64;
-    let mut total_rx = 0u64;
-    let mut total_tx = 0u64;
-    for (_name, net) in &guard.networks {
-        rx_delta += net.received();
-        tx_delta += net.transmitted();
-        total_rx += net.total_received();
-        total_tx += net.total_transmitted();
-    }
-    let net_rx_rate = (rx_delta as f64 / elapsed_secs) as u64;
-    let net_tx_rate = (tx_delta as f64 / elapsed_secs) as u64;
+    let (net_rx_rate, net_tx_rate, total_rx, total_tx) = refresh_network_rates(&mut guard);
 
     let (processes, normalized_sort) =
         collect_top_processes(&guard.sys, total_mem, sort_by, limit);

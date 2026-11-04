@@ -42,6 +42,9 @@ fn main() {
     core_clipboard::set_clipboard_enabled(initial_cfg.clipboard_enabled);
     core_clipboard::start_clipboard_watcher();
     core_cleaner::prewarm_cleaner_cache();
+    std::thread::spawn(|| {
+        core_window::register_current_app_with_launch_services();
+    });
 
     // 2. Build the native macOS event loop
     let event_loop = EventLoopBuilder::<AppUserEvent>::with_user_event().build();
@@ -49,6 +52,25 @@ fn main() {
 
     // 3. Create native macOS Menu Bar item right next to the MacBook Battery % icon!
     init_native_macos_menubar_item(proxy.clone());
+    let _ = crate::menubar::sync_menubar_from_config(&initial_cfg);
+
+    let menubar_ticker_proxy = proxy.clone();
+    std::thread::Builder::new()
+        .name("menubar-status-ticker".to_string())
+        .spawn(move || loop {
+            let cfg = core_input::get_input_config();
+            let interval_secs = cfg.menubar_refresh_interval_sec.clamp(1, 30) as u64;
+            if cfg.menubar_enabled
+                && cfg.menubar_display_mode != "hidden"
+                && crate::menubar::menubar_mode_needs_live_stats(&cfg)
+            {
+                let stats = core_monitor::get_menubar_stats();
+                let title = crate::menubar::format_menubar_title(&cfg, &stats);
+                let _ = menubar_ticker_proxy.send_event(AppUserEvent::UpdateMenuBarTitle(title));
+            }
+            std::thread::sleep(std::time::Duration::from_secs(interval_secs));
+        })
+        .expect("Failed to spawn menubar status ticker thread");
 
     // 4. Register Carbon Global HotKeys (Option+Tab, Cmd+Shift+V, F3, Window Tiling) & HID CGEventTap
     let tap_proxy = proxy.clone();
@@ -79,6 +101,9 @@ fn main() {
         }
         core_input::UiOverlayEvent::SnapOwnWindow(layout) => {
             let _ = tap_proxy.send_event(AppUserEvent::SnapOwnMainWindow(layout));
+        }
+        core_input::UiOverlayEvent::ToggleMainDashboard => {
+            let _ = tap_proxy.send_event(AppUserEvent::ToggleLauncher);
         }
         core_input::UiOverlayEvent::HideAllOverlays => {
             let _ = tap_proxy.send_event(AppUserEvent::HideAllOverlays);
@@ -260,6 +285,13 @@ fn main() {
         match event {
             Event::UserEvent(user_ev) => match user_ev {
                 AppUserEvent::ToggleMenuBarPopover => {
+                    let cfg = core_input::get_input_config();
+                    if !cfg.menubar_enabled || cfg.menubar_display_mode == "hidden" {
+                        if mini_window.is_visible() {
+                            mini_window.set_visible(false);
+                        }
+                        return;
+                    }
                     let vis = mini_window.is_visible();
                     if vis {
                         mini_window.set_visible(false);
@@ -298,7 +330,20 @@ fn main() {
                     }
                 }
                 AppUserEvent::UpdateMenuBarTitle(title) => {
-                    update_status_bar_title(&title);
+                    let cfg = core_input::get_input_config();
+                    if cfg.menubar_enabled && cfg.menubar_display_mode != "hidden" {
+                        update_status_bar_title(&title);
+                    }
+                }
+                AppUserEvent::SyncMenuBarConfig => {
+                    let cfg = core_input::get_input_config();
+                    let (visible, _) = crate::menubar::sync_menubar_from_config(&cfg);
+                    if !visible && mini_window.is_visible() {
+                        mini_window.set_visible(false);
+                    }
+                    let _ = mini_webview.evaluate_script(
+                        "window.__refreshMiniPopover && window.__refreshMiniPopover();",
+                    );
                 }
                 AppUserEvent::SetAppTheme(theme) => {
                     let script = format!(
@@ -332,6 +377,26 @@ fn main() {
                     }
                     main_window.set_visible(true);
                     main_window.set_focus();
+                }
+                AppUserEvent::ToggleLauncher => {
+                    let my_pid = std::process::id() as i32;
+                    let is_front = core_window::frontmost_application_pid() == my_pid;
+                    if main_window.is_visible() && is_front {
+                        main_window.set_visible(false);
+                        unsafe {
+                            set_macos_dock_icon_visible(false);
+                        }
+                    } else {
+                        unsafe {
+                            set_macos_dock_icon_visible(true);
+                            if !main_window.is_visible() {
+                                place_main_window_center_75_full_height(&main_window);
+                            }
+                            setup_macos_application_menu();
+                        }
+                        main_window.set_visible(true);
+                        main_window.set_focus();
+                    }
                 }
                 AppUserEvent::ShowAboutDialog => {
                     unsafe {
@@ -377,6 +442,17 @@ fn main() {
                     *control_flow = ControlFlow::Exit;
                 }
                 AppUserEvent::ToggleClipboardDrawer => {
+                    if !core_input::get_input_config().clipboard_enabled {
+                        if clip_window.is_visible() {
+                            clip_window.set_visible(false);
+                            if !alttab_window.is_visible()
+                                && !screenshot_windows.iter().any(|w| w.is_visible())
+                            {
+                                core_input::set_overlay_escape_hotkey_active(false);
+                            }
+                        }
+                        return;
+                    }
                     let vis = clip_window.is_visible();
                     if vis {
                         clip_window.set_visible(false);
@@ -409,6 +485,17 @@ fn main() {
                     }
                 }
                 AppUserEvent::ToggleAltTabOverlay => {
+                    if !core_input::get_input_config().replace_macos_cmd_tab {
+                        if alttab_window.is_visible() {
+                            alttab_window.set_visible(false);
+                            if !clip_window.is_visible()
+                                && !screenshot_windows.iter().any(|w| w.is_visible())
+                            {
+                                core_input::set_overlay_escape_hotkey_active(false);
+                            }
+                        }
+                        return;
+                    }
                     let vis = alttab_window.is_visible();
                     if vis {
                         let _ = alttab_webview.evaluate_script(
@@ -446,7 +533,10 @@ fn main() {
                     instant_copy,
                 } => {
                     let cfg = core_input::get_input_config();
-                    if !cfg.screenshot_enabled {
+                    if !cfg.screenshot_enabled
+                        || (instant_copy && !cfg.screenshot_fullscreen_copy_enabled)
+                        || (!instant_copy && !cfg.screenshot_fullscreen_edit_enabled)
+                    {
                         return;
                     }
                     if screenshot_windows.iter().any(|w| w.is_visible()) {
@@ -817,7 +907,9 @@ fn main() {
                     }
                 }
                 AppUserEvent::SnapOwnMainWindow(layout) => {
-                    if main_window.is_visible() {
+                    if core_input::get_input_config().window_snapping_enabled
+                        && main_window.is_visible()
+                    {
                         unsafe {
                             snap_nswindow_directly(&main_window, &layout);
                         }
@@ -896,11 +988,27 @@ fn main() {
                         core_input::set_overlay_escape_hotkey_active(false);
                     }
                 } else if window_id == main_id {
-                    main_window.set_visible(false);
-                    unsafe {
-                        set_macos_dock_icon_visible(false);
+                    let cfg = core_input::get_input_config();
+                    if cfg.keep_running_in_background {
+                        main_window.set_visible(false);
+                        unsafe {
+                            set_macos_dock_icon_visible(false);
+                        }
+                    } else {
+                        *control_flow = ControlFlow::Exit;
                     }
                 }
+            }
+            Event::Reopen { .. } => {
+                unsafe {
+                    set_macos_dock_icon_visible(true);
+                    if !main_window.is_visible() {
+                        place_main_window_center_75_full_height(&main_window);
+                    }
+                    setup_macos_application_menu();
+                }
+                main_window.set_visible(true);
+                main_window.set_focus();
             }
             Event::WindowEvent {
                 window_id,

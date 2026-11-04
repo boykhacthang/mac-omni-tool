@@ -8,8 +8,26 @@ function createMouseScreen({ isTabActive } = {}) {
   let pollTimer = null;
   let selectedProfileKey = "__default__"; // "__default__" or app bundle_id
   let selectedDiagramBtn = "forward"; // "forward" | "back" | "middle" | "chord"
-  let showAddAppForm = false;
+  let showAppPickerModal = false;
+  let cachedInstalledApps = null;
+  let modalSearchQuery = "";
   let lastSeenBtnAt = 0;
+
+  function iconForBundleId(bundleId) {
+    const b = (bundleId || "").toLowerCase();
+    if (b.includes("chrome") || b.includes("safari")) return "🧭";
+    if (b.includes("firefox")) return "🦊";
+    if (b.includes("brave")) return "🦁";
+    if (b.includes("edgemac")) return "🌊";
+    if (b.includes("thebrowser")) return "🌈";
+    if (b.includes("vscode") || b.includes("cursor") || b.includes("xcode") || b.includes("jetbrains")) return "💻";
+    if (b.includes("terminal") || b.includes("iterm") || b.includes("warp")) return "⌨️";
+    if (b.includes("finder")) return "📁";
+    if (b.includes("figma") || b.includes("photoshop") || b.includes("illustrator")) return "🎨";
+    if (b.includes("slack") || b.includes("discord") || b.includes("telegram") || b.includes("zalo")) return "💬";
+    if (b.includes("spotify") || b.includes("music")) return "🎵";
+    return "🧩";
+  }
 
   function stopPolling() {
     if (pollTimer) {
@@ -100,6 +118,14 @@ function createMouseScreen({ isTabActive } = {}) {
       a => a.bundle_id && !existingBundles.has(a.bundle_id.toLowerCase())
     );
 
+    const masterEnabled = cfg.external_mouse_enabled !== false;
+    const buttonsEnabled = masterEnabled && cfg.mouse_buttons_enabled !== false;
+    const smoothEnabled = masterEnabled && cfg.smooth_scroll_enabled !== false;
+    const chordEnabled = masterEnabled && !!cfg.mouse_chord_enabled;
+    const profileActive = !activeProfile || activeProfile.enabled !== false;
+    const btnRowControlsEnabled = buttonsEnabled && profileActive;
+    const diagramTestEnabled = selectedDiagramBtn === "chord" ? chordEnabled : btnRowControlsEnabled;
+
     view.innerHTML = `
       <div class="page-header">
         <div class="page-title-row">
@@ -156,16 +182,16 @@ function createMouseScreen({ isTabActive } = {}) {
         </div>
 
         <!-- 2. Reverse Scroll (Invert External Mouse Scroll) -->
-        <div class="card" style="margin-bottom:0;padding:10px 13px;border-color:${cfg.invert_external_mouse_scroll ? 'rgba(16,185,129,0.4)' : 'var(--border)'};">
+        <div class="card" style="margin-bottom:0;padding:10px 13px;border-color:${masterEnabled && cfg.invert_external_mouse_scroll ? 'rgba(16,185,129,0.4)' : 'var(--border)'};${masterEnabled ? '' : 'opacity:0.55;'}">
           <div class="card-header" style="margin-bottom:2px;">
             <div class="card-title" style="font-size:13px;">
               <span>🔄 ${t("mouse.card_reverse_title")}</span>
-              ${cfg.invert_external_mouse_scroll
+              ${masterEnabled && cfg.invert_external_mouse_scroll
                 ? `<span class="badge-ok">${t("mouse.badge_reversed")}</span>`
                 : ""}
             </div>
             <label class="switch">
-              <input type="checkbox" id="chk-invert-scroll-top" ${cfg.invert_external_mouse_scroll ? "checked" : ""} />
+              <input type="checkbox" id="chk-invert-scroll-top" ${cfg.invert_external_mouse_scroll ? "checked" : ""} ${masterEnabled ? "" : "disabled"} />
               <span class="slider-toggle"></span>
             </label>
           </div>
@@ -175,16 +201,16 @@ function createMouseScreen({ isTabActive } = {}) {
         </div>
 
         <!-- 3. 120Hz Smooth Scroll -->
-        <div class="card" style="margin-bottom:0;padding:10px 13px;border-color:${cfg.smooth_scroll_enabled !== false ? 'rgba(59,130,246,0.35)' : 'var(--border)'};">
+        <div class="card" style="margin-bottom:0;padding:10px 13px;border-color:${smoothEnabled ? 'rgba(59,130,246,0.35)' : 'var(--border)'};${masterEnabled ? '' : 'opacity:0.55;'}">
           <div class="card-header" style="margin-bottom:2px;">
             <div class="card-title" style="font-size:13px;">
               <span>🌊 ${t("mouse.card_smooth_title")}</span>
-              ${cfg.smooth_scroll_enabled !== false
+              ${smoothEnabled
                 ? `<span class="badge-ok">120Hz</span>`
                 : ""}
             </div>
             <label class="switch">
-              <input type="checkbox" id="chk-smooth-scroll-top" ${cfg.smooth_scroll_enabled !== false ? "checked" : ""} />
+              <input type="checkbox" id="chk-smooth-scroll-top" ${cfg.smooth_scroll_enabled !== false ? "checked" : ""} ${masterEnabled ? "" : "disabled"} />
               <span class="slider-toggle"></span>
             </label>
           </div>
@@ -196,7 +222,7 @@ function createMouseScreen({ isTabActive } = {}) {
 
       ${mouseSubTab === "buttons" ? `
         <!-- SUB-TAB 1: MOUSE BUTTONS & PER-APP PROFILES -->
-        <div class="card" style="margin-bottom:0;${cfg.external_mouse_enabled === false ? 'opacity:0.6;' : ''}">
+        <div class="card" style="margin-bottom:0;${masterEnabled ? '' : 'opacity:0.6;'}">
           <div class="card-header" style="margin-bottom:8px;">
             <div class="card-title">
               <span>🎯 ${t("mouse.buttons_card_title")}</span>
@@ -205,7 +231,7 @@ function createMouseScreen({ isTabActive } = {}) {
             <div style="display:flex;align-items:center;gap:8px;">
               <span class="stat-sub">${t("mouse.enable_btn_mapping")}</span>
               <label class="switch">
-                <input type="checkbox" id="chk-mouse-buttons-enabled" ${cfg.mouse_buttons_enabled !== false ? "checked" : ""} />
+                <input type="checkbox" id="chk-mouse-buttons-enabled" ${cfg.mouse_buttons_enabled !== false ? "checked" : ""} ${masterEnabled ? "" : "disabled"} />
                 <span class="slider-toggle"></span>
               </label>
             </div>
@@ -259,7 +285,7 @@ function createMouseScreen({ isTabActive } = {}) {
                 <div style="font-size:11px;color:var(--text-muted);margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
                   ${escapeHtml(getActionLabel(diagramBtnActionKey))}
                 </div>
-                <button class="btn btn-sm btn-primary" id="btn-test-diagram-action" style="width:100%;">
+                <button class="btn btn-sm btn-primary" id="btn-test-diagram-action" style="width:100%;" ${diagramTestEnabled ? "" : "disabled"}>
                   ▶️ ${t("mouse.btn_test_action")}
                 </button>
               </div>
@@ -269,13 +295,25 @@ function createMouseScreen({ isTabActive } = {}) {
             <div style="display:flex;flex-direction:column;gap:8px;min-width:0;">
               <!-- App Selector Bar -->
               <div style="background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:9px 12px;">
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
                   <span style="font-size:12px;font-weight:600;">
                     1. ${t("mouse.select_app_profile")}
                   </span>
-                  <button class="btn btn-sm" id="btn-toggle-add-app" style="color:var(--accent);border-color:rgba(59,130,246,0.35);">
-                    ${showAddAppForm ? t("mouse.btn_close_add_app") : t("mouse.btn_add_app")}
-                  </button>
+                  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                    <!-- Option 1: Select directly from currently open apps -->
+                    <select class="select-box" id="sel-add-running-app" style="min-width:195px;max-width:250px;font-size:11.5px;padding:4px 8px;" ${masterEnabled ? "" : "disabled"}>
+                      <option value="">${t("mouse.pick_running_app")}</option>
+                      ${availableRunningApps.map(a => `
+                        <option value="${escapeHtml(a.bundle_id)}" data-name="${escapeHtml(a.app_name)}">
+                          🟢 ${escapeHtml(a.app_name)}
+                        </option>
+                      `).join("")}
+                    </select>
+                    <!-- Option 2: Open App Picker Popup (Installed Apps + Finder .app dialog) -->
+                    <button class="btn btn-sm" id="btn-open-app-picker-modal" style="color:var(--accent);border-color:rgba(59,130,246,0.4);" ${masterEnabled ? "" : "disabled"}>
+                      ${t("mouse.btn_open_app_popup")}
+                    </button>
+                  </div>
                 </div>
 
                 <div class="app-profile-pills">
@@ -285,29 +323,11 @@ function createMouseScreen({ isTabActive } = {}) {
                   </button>
                   ${profiles.map(p => `
                     <button class="app-profile-pill ${selectedProfileKey === p.bundle_id ? 'active' : ''} ${p.enabled === false ? 'disabled-prof' : ''}" data-profile="${escapeHtml(p.bundle_id)}">
-                      <span>${escapeHtml(p.icon || "🧩")}</span>
+                      <span>${escapeHtml(p.icon || iconForBundleId(p.bundle_id))}</span>
                       <span>${escapeHtml(p.app_name)}</span>
                     </button>
                   `).join("")}
                 </div>
-
-                ${showAddAppForm ? `
-                  <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                    <select class="select-box" id="sel-add-running-app" style="flex:1;min-width:200px;">
-                      <option value="">${t("mouse.pick_running_app")}</option>
-                      ${availableRunningApps.map(a => `
-                        <option value="${escapeHtml(a.bundle_id)}" data-name="${escapeHtml(a.app_name)}">
-                          ${escapeHtml(a.app_name)} (${escapeHtml(a.bundle_id)})
-                        </option>
-                      `).join("")}
-                    </select>
-                    <input type="text" class="input-box" id="inp-custom-bundle" placeholder="${t("mouse.bundle_placeholder")}" style="min-width:180px;flex:1;" />
-                    <input type="text" class="input-box" id="inp-custom-appname" placeholder="${t("mouse.appname_placeholder")}" style="width:140px;" />
-                    <button class="btn btn-sm btn-primary" id="btn-confirm-add-app">
-                      ${t("mouse.btn_confirm_add_app")}
-                    </button>
-                  </div>
-                ` : ""}
               </div>
 
               <!-- Selected Profile Settings Card -->
@@ -326,10 +346,10 @@ function createMouseScreen({ isTabActive } = {}) {
                     <div style="display:flex;align-items:center;gap:8px;">
                       <span class="stat-sub">${t("mouse.active_for_this_app")}</span>
                       <label class="switch">
-                        <input type="checkbox" id="chk-profile-enabled" ${activeProfile.enabled !== false ? "checked" : ""} />
+                        <input type="checkbox" id="chk-profile-enabled" ${activeProfile.enabled !== false ? "checked" : ""} ${masterEnabled ? "" : "disabled"} />
                         <span class="slider-toggle"></span>
                       </label>
-                      <button class="btn btn-sm btn-danger" id="btn-delete-profile" title="${t("mouse.tip_delete_profile")}">🗑️</button>
+                      <button class="btn btn-sm btn-danger" id="btn-delete-profile" title="${t("mouse.tip_delete_profile")}" ${masterEnabled ? "" : "disabled"}>🗑️</button>
                     </div>
                   ` : `
                     <span class="badge-ok">
@@ -339,7 +359,7 @@ function createMouseScreen({ isTabActive } = {}) {
                 </div>
 
                 <!-- Row 1: Mouse 5 (Forward) -->
-                <div class="mouse-setting-row" style="border-bottom:1px solid var(--border);">
+                <div class="mouse-setting-row" style="border-bottom:1px solid var(--border);${btnRowControlsEnabled ? '' : 'opacity:0.6;'}">
                   <div class="mouse-setting-info">
                     <span class="mouse-btn-badge">Mouse 5</span>
                     <div class="mouse-setting-text">
@@ -351,13 +371,13 @@ function createMouseScreen({ isTabActive } = {}) {
                       </div>
                     </div>
                   </div>
-                  <select class="select-box mouse-action-select" id="sel-mouse-forward">
+                  <select class="select-box mouse-action-select" id="sel-mouse-forward" ${btnRowControlsEnabled ? "" : "disabled"}>
                     ${renderActionOptionsHtml(curForward)}
                   </select>
                 </div>
 
                 <!-- Row 2: Mouse 4 (Back) -->
-                <div class="mouse-setting-row" style="border-bottom:1px solid var(--border);">
+                <div class="mouse-setting-row" style="border-bottom:1px solid var(--border);${btnRowControlsEnabled ? '' : 'opacity:0.6;'}">
                   <div class="mouse-setting-info">
                     <span class="mouse-btn-badge">Mouse 4</span>
                     <div class="mouse-setting-text">
@@ -369,27 +389,27 @@ function createMouseScreen({ isTabActive } = {}) {
                       </div>
                     </div>
                   </div>
-                  <select class="select-box mouse-action-select" id="sel-mouse-back">
+                  <select class="select-box mouse-action-select" id="sel-mouse-back" ${btnRowControlsEnabled ? "" : "disabled"}>
                     ${renderActionOptionsHtml(curBack)}
                   </select>
                 </div>
 
                 <!-- Row 3: Mouse 3 (Middle Wheel Click) -->
-                <div class="mouse-setting-row" style="border-bottom:1px solid var(--border);">
+                <div class="mouse-setting-row" style="border-bottom:1px solid var(--border);${btnRowControlsEnabled ? '' : 'opacity:0.6;'}">
                   <div class="mouse-setting-info">
                     <span class="mouse-btn-badge" style="color:var(--success);border-color:rgba(16,185,129,0.3);background:rgba(16,185,129,0.12);">Mouse 3</span>
                     <div class="mouse-setting-text">
                       <div style="font-weight:600;">${t("mouse.row_middle_title")}</div>
                     </div>
                   </div>
-                  <select class="select-box mouse-action-select" id="sel-mouse-middle">
+                  <select class="select-box mouse-action-select" id="sel-mouse-middle" ${btnRowControlsEnabled ? "" : "disabled"}>
                     ${renderActionOptionsHtml(curMiddle)}
                   </select>
                 </div>
 
                 <!-- Row 4: Context-specific row (Single-Space Fallback on Default vs Smooth Scroll Override on App Profile) -->
                 ${!activeProfile ? `
-                  <div class="mouse-setting-row" style="border-bottom:1px solid var(--border);">
+                  <div class="mouse-setting-row" style="border-bottom:1px solid var(--border);${buttonsEnabled ? '' : 'opacity:0.6;'}">
                     <div class="mouse-setting-info">
                       <span class="mouse-btn-badge" style="color:var(--warning);border-color:rgba(245,158,11,0.35);background:rgba(245,158,11,0.14);">Spaces</span>
                       <div class="mouse-setting-text">
@@ -397,7 +417,7 @@ function createMouseScreen({ isTabActive } = {}) {
                         <div class="stat-sub">${t("mouse.row_single_space_sub")}</div>
                       </div>
                     </div>
-                    <select class="select-box mouse-action-select" id="sel-single-space-fallback">
+                    <select class="select-box mouse-action-select" id="sel-single-space-fallback" ${buttonsEnabled ? "" : "disabled"}>
                       <option value="passthrough" ${cfg.single_space_fallback === 'passthrough' ? 'selected' : ''}>
                         ${t("mouse.fallback_passthrough")}
                       </option>
@@ -420,7 +440,7 @@ function createMouseScreen({ isTabActive } = {}) {
                       </div>
                     </div>
                     <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
-                      <select class="select-box" id="sel-chord-action-mouse" style="width:192px;font-size:12px;padding:5px 8px;">
+                      <select class="select-box" id="sel-chord-action-mouse" style="width:192px;font-size:12px;padding:5px 8px;" ${chordEnabled ? "" : "disabled"}>
                         <option value="mission_control" ${cfg.mouse_chord_action === 'mission_control' ? 'selected' : ''}>🚀 Mission Control (F3)</option>
                         <option value="app_expose" ${cfg.mouse_chord_action === 'app_expose' ? 'selected' : ''}>🪟 App Exposé</option>
                         <option value="show_desktop" ${cfg.mouse_chord_action === 'show_desktop' ? 'selected' : ''}>🖥️ ${t("mouse.chord_show_desktop")}</option>
@@ -430,13 +450,13 @@ function createMouseScreen({ isTabActive } = {}) {
                         <option value="screenshot" ${cfg.mouse_chord_action === 'screenshot' ? 'selected' : ''}>📸 ${t("mouse.chord_screenshot")}</option>
                       </select>
                       <label class="switch">
-                        <input type="checkbox" id="chk-chord-enabled-mouse" ${cfg.mouse_chord_enabled ? 'checked' : ''} />
+                        <input type="checkbox" id="chk-chord-enabled-mouse" ${cfg.mouse_chord_enabled ? 'checked' : ''} ${masterEnabled ? "" : "disabled"} />
                         <span class="slider-toggle"></span>
                       </label>
                     </div>
                   </div>
                 ` : `
-                  <div class="mouse-setting-row" style="padding-bottom:2px;">
+                  <div class="mouse-setting-row" style="padding-bottom:2px;${masterEnabled && profileActive && smoothEnabled ? '' : 'opacity:0.6;'}">
                     <div class="mouse-setting-info">
                       <span class="mouse-btn-badge">🌊 120Hz</span>
                       <div class="mouse-setting-text">
@@ -444,7 +464,7 @@ function createMouseScreen({ isTabActive } = {}) {
                         <div class="stat-sub">${t("mouse.prof_smooth_sub")}</div>
                       </div>
                     </div>
-                    <select class="select-box mouse-action-select" id="sel-profile-smooth-mode">
+                    <select class="select-box mouse-action-select" id="sel-profile-smooth-mode" ${masterEnabled && profileActive && smoothEnabled ? "" : "disabled"}>
                       <option value="inherit" ${(activeProfile.smooth_scroll_mode || 'inherit') === 'inherit' ? 'selected' : ''}>
                         ${t("mouse.prof_smooth_inherit")}
                       </option>
@@ -463,27 +483,27 @@ function createMouseScreen({ isTabActive } = {}) {
         </div>
       ` : `
         <!-- SUB-TAB 2: 120HZ SMOOTH SCROLL & REVERSE SCROLL TUNING -->
-        <div class="card" style="margin-bottom:0;${cfg.external_mouse_enabled === false ? 'opacity:0.6;' : ''}">
+        <div class="card" style="margin-bottom:0;${masterEnabled ? '' : 'opacity:0.6;'}">
           <div class="card-header">
             <div class="card-title">
               <span>🌊 ${t("mouse.scroll_card_title")}</span>
               ${renderTip(t("mouse.scroll_card_tip"))}
             </div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;">
-              <button class="btn btn-sm smooth-preset" data-step="35" data-dur="200" data-acc="1.4">${t("mouse.preset_snappy")}</button>
-              <button class="btn btn-sm smooth-preset" data-step="45" data-dur="260" data-acc="1.6">${t("mouse.preset_balanced")}</button>
-              <button class="btn btn-sm smooth-preset" data-step="65" data-dur="360" data-acc="2.0">${t("mouse.preset_silky")}</button>
+              <button class="btn btn-sm smooth-preset" data-step="35" data-dur="200" data-acc="1.4" ${masterEnabled ? "" : "disabled"}>${t("mouse.preset_snappy")}</button>
+              <button class="btn btn-sm smooth-preset" data-step="45" data-dur="260" data-acc="1.6" ${masterEnabled ? "" : "disabled"}>${t("mouse.preset_balanced")}</button>
+              <button class="btn btn-sm smooth-preset" data-step="65" data-dur="360" data-acc="2.0" ${masterEnabled ? "" : "disabled"}>${t("mouse.preset_silky")}</button>
             </div>
           </div>
 
-          <div class="grid-3" style="margin-bottom:10px;">
+          <div class="grid-3" style="margin-bottom:10px;${smoothEnabled ? '' : 'opacity:0.55;'}">
             <!-- Slider 1: Step Size -->
             <div style="background:var(--bg-input);border:1px solid var(--border);border-radius:9px;padding:10px 12px;">
               <div style="display:flex;justify-content:space-between;margin-bottom:5px;">
                 <span>📏 ${t("mouse.slider_step_title")}</span>
                 <b id="lbl-scroll-step">${cfg.scroll_step_px || 45} px</b>
               </div>
-              <input type="range" min="15" max="120" step="5" value="${cfg.scroll_step_px || 45}" id="slider-scroll-step" />
+              <input type="range" min="15" max="120" step="5" value="${cfg.scroll_step_px || 45}" id="slider-scroll-step" ${smoothEnabled ? "" : "disabled"} />
               <div class="stat-sub" style="margin-top:4px;">${t("mouse.slider_step_sub")}</div>
             </div>
 
@@ -493,7 +513,7 @@ function createMouseScreen({ isTabActive } = {}) {
                 <span>⏳ ${t("mouse.slider_dur_title")}</span>
                 <b id="lbl-scroll-dur">${cfg.scroll_duration_ms || 260} ms</b>
               </div>
-              <input type="range" min="80" max="600" step="20" value="${cfg.scroll_duration_ms || 260}" id="slider-scroll-dur" />
+              <input type="range" min="80" max="600" step="20" value="${cfg.scroll_duration_ms || 260}" id="slider-scroll-dur" ${smoothEnabled ? "" : "disabled"} />
               <div class="stat-sub" style="margin-top:4px;">${t("mouse.slider_dur_sub")}</div>
             </div>
 
@@ -503,7 +523,7 @@ function createMouseScreen({ isTabActive } = {}) {
                 <span>🚀 ${t("mouse.slider_acc_title")}</span>
                 <b id="lbl-scroll-acc">${Number(cfg.scroll_acceleration || 1.6).toFixed(1)}x</b>
               </div>
-              <input type="range" min="10" max="30" step="1" value="${Math.round((cfg.scroll_acceleration || 1.6) * 10)}" id="slider-scroll-acc" />
+              <input type="range" min="10" max="30" step="1" value="${Math.round((cfg.scroll_acceleration || 1.6) * 10)}" id="slider-scroll-acc" ${smoothEnabled ? "" : "disabled"} />
               <div class="stat-sub" style="margin-top:4px;">${t("mouse.slider_acc_sub")}</div>
             </div>
           </div>
@@ -514,7 +534,7 @@ function createMouseScreen({ isTabActive } = {}) {
               <div class="stat-sub">${t("mouse.row_reverse_bottom_sub")}</div>
             </div>
             <label class="switch">
-              <input type="checkbox" id="chk-invert-scroll-bottom" ${cfg.invert_external_mouse_scroll ? "checked" : ""} />
+              <input type="checkbox" id="chk-invert-scroll-bottom" ${cfg.invert_external_mouse_scroll ? "checked" : ""} ${masterEnabled ? "" : "disabled"} />
               <span class="slider-toggle"></span>
             </label>
           </div>
@@ -525,7 +545,7 @@ function createMouseScreen({ isTabActive } = {}) {
               <div class="stat-sub">${t("mouse.row_shift_horiz_sub")}</div>
             </div>
             <label class="switch">
-              <input type="checkbox" id="chk-shift-horiz" ${cfg.shift_horizontal_scroll !== false ? "checked" : ""} />
+              <input type="checkbox" id="chk-shift-horiz" ${cfg.shift_horizontal_scroll !== false ? "checked" : ""} ${masterEnabled ? "" : "disabled"} />
               <span class="slider-toggle"></span>
             </label>
           </div>
@@ -546,6 +566,30 @@ function createMouseScreen({ isTabActive } = {}) {
           </div>
         </div>
       `}
+
+      ${showAppPickerModal ? `
+        <div id="mouse-app-picker-backdrop" style="position:fixed;inset:0;background:rgba(15,23,42,0.68);backdrop-filter:blur(6px);z-index:999;display:flex;align-items:center;justify-content:center;padding:18px;">
+          <div style="width:100%;max-width:580px;max-height:82vh;background:var(--bg-card);border:1px solid var(--border);border-radius:14px;box-shadow:0 20px 50px rgba(0,0,0,0.45);display:flex;flex-direction:column;overflow:hidden;">
+            <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;">
+              <div>
+                <div style="font-weight:700;font-size:14px;">${t("mouse.modal_title")}</div>
+                <div class="stat-sub" style="font-size:11.5px;margin-top:2px;">${t("mouse.modal_sub")}</div>
+              </div>
+              <button class="btn btn-sm" id="btn-close-app-picker-modal">${t("mouse.btn_close_add_app")}</button>
+            </div>
+
+            <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--bg-input);">
+              <input type="text" class="input-box" id="inp-modal-app-search" value="${escapeHtml(modalSearchQuery)}" placeholder="${t("mouse.modal_search_placeholder")}" style="flex:1;min-width:220px;" />
+              <button class="btn btn-sm btn-primary" id="btn-pick-finder-app">
+                ${t("mouse.btn_pick_finder_app")}
+              </button>
+            </div>
+
+            <div id="modal-app-picker-list" style="padding:10px 16px;overflow-y:auto;max-height:360px;display:flex;flex-direction:column;gap:6px;">
+            </div>
+          </div>
+        </div>
+      ` : ""}
     `;
 
     view.querySelectorAll("#mouse-subtabs .pill-tab").forEach(btn => {
@@ -555,16 +599,50 @@ function createMouseScreen({ isTabActive } = {}) {
       });
     });
 
-    const saveConfigPatch = async (patchFn) => {
+    const saveConfigPatch = async (patchFn, customToast) => {
       const latest = await api("get_input_config");
       patchFn(latest);
       await api("update_input_config", latest);
-      showToast(t("mouse.toast_saved"));
+      showToast(customToast || t("mouse.toast_saved"));
       await render(view);
     };
 
+    const addOrSelectAppProfile = async (bundleId, appName) => {
+      const bTrim = (bundleId || "").trim();
+      if (!bTrim) return;
+      const aName = (appName || "").trim() || bTrim;
+      showAppPickerModal = false;
+      await saveConfigPatch(
+        c => {
+          c.app_mouse_profiles = Array.isArray(c.app_mouse_profiles) ? c.app_mouse_profiles : [];
+          const existing = c.app_mouse_profiles.find(
+            p => (p.bundle_id || "").toLowerCase() === bTrim.toLowerCase()
+          );
+          if (!existing) {
+            c.app_mouse_profiles.push({
+              bundle_id: bTrim,
+              app_name: aName,
+              icon: iconForBundleId(bTrim),
+              enabled: true,
+              forward_action: "default",
+              back_action: "default",
+              middle_action: "default",
+              smooth_scroll_mode: "inherit"
+            });
+          } else {
+            existing.enabled = true;
+          }
+          selectedProfileKey = existing ? existing.bundle_id : bTrim;
+        },
+        t("mouse.toast_added_app", { name: aName })
+      );
+    };
+
     // Header buttons
-    document.getElementById("btn-refresh-mouse").onclick = () => render(view);
+    document.getElementById("btn-refresh-mouse").onclick = () => {
+      cachedInstalledApps = null;
+      render(view);
+    };
     document.getElementById("btn-reset-mouse-defaults").onclick = async () => {
       await api("reset_mouse_profiles");
       selectedProfileKey = "__default__";
@@ -611,53 +689,135 @@ function createMouseScreen({ isTabActive } = {}) {
         });
       });
 
-      // Add App Form
-      document.getElementById("btn-toggle-add-app").onclick = () => {
-        showAddAppForm = !showAddAppForm;
-        render(view);
-      };
-
+      // Option 1: Select directly from currently open/running apps dropdown
       const selRunning = document.getElementById("sel-add-running-app");
       if (selRunning) {
-        selRunning.onchange = () => {
+        selRunning.onchange = async () => {
           const opt = selRunning.options[selRunning.selectedIndex];
           if (opt && opt.value) {
-            document.getElementById("inp-custom-bundle").value = opt.value;
-            document.getElementById("inp-custom-appname").value = opt.dataset.name || opt.value;
+            await addOrSelectAppProfile(opt.value, opt.dataset.name || opt.value);
           }
         };
       }
 
-      const btnConfirmAdd = document.getElementById("btn-confirm-add-app");
-      if (btnConfirmAdd) {
-        btnConfirmAdd.onclick = async () => {
-          const bundleId = (document.getElementById("inp-custom-bundle").value || "").trim();
-          const appName = (document.getElementById("inp-custom-appname").value || "").trim() || bundleId;
-          if (!bundleId) {
-            showToast(t("mouse.toast_need_bundle"));
+      // Option 2: Open App Picker Modal Popup
+      const btnOpenPopup = document.getElementById("btn-open-app-picker-modal");
+      if (btnOpenPopup) {
+        btnOpenPopup.onclick = async () => {
+          showAppPickerModal = true;
+          modalSearchQuery = "";
+          if (!cachedInstalledApps) {
+            const appRes = await api("list_installed_mouse_apps");
+            cachedInstalledApps = (appRes && Array.isArray(appRes.installed_apps))
+              ? appRes.installed_apps
+              : [];
+          }
+          await render(view);
+        };
+      }
+
+      if (showAppPickerModal) {
+        const runningSet = new Set(runningApps.map(a => (a.bundle_id || "").toLowerCase()));
+        const allMap = new Map();
+        for (const a of runningApps) {
+          if (a.bundle_id) allMap.set(a.bundle_id.toLowerCase(), a);
+        }
+        for (const a of (cachedInstalledApps || [])) {
+          if (a.bundle_id && !allMap.has(a.bundle_id.toLowerCase())) {
+            allMap.set(a.bundle_id.toLowerCase(), a);
+          }
+        }
+        const mergedApps = Array.from(allMap.values()).sort((a, b) => {
+          const aRun = runningSet.has(a.bundle_id.toLowerCase()) ? 0 : 1;
+          const bRun = runningSet.has(b.bundle_id.toLowerCase()) ? 0 : 1;
+          if (aRun !== bRun) return aRun - bRun;
+          return (a.app_name || "").localeCompare(b.app_name || "");
+        });
+
+        const renderModalList = (q) => {
+          const listEl = document.getElementById("modal-app-picker-list");
+          if (!listEl) return;
+          const qNorm = (q || "").trim().toLowerCase();
+          const filtered = mergedApps.filter(a => {
+            if (!qNorm) return true;
+            return (
+              (a.app_name || "").toLowerCase().includes(qNorm) ||
+              (a.bundle_id || "").toLowerCase().includes(qNorm)
+            );
+          });
+          if (filtered.length === 0) {
+            listEl.innerHTML = `<div class="stat-sub" style="padding:18px;text-align:center;">${t("mouse.modal_empty")}</div>`;
             return;
           }
-          await saveConfigPatch(c => {
-            c.app_mouse_profiles = Array.isArray(c.app_mouse_profiles) ? c.app_mouse_profiles : [];
-            const existing = c.app_mouse_profiles.find(
-              p => p.bundle_id.toLowerCase() === bundleId.toLowerCase()
-            );
-            if (!existing) {
-              c.app_mouse_profiles.push({
-                bundle_id: bundleId,
-                app_name: appName,
-                icon: "🧩",
-                enabled: true,
-                forward_action: "default",
-                back_action: "default",
-                middle_action: "default",
-                smooth_scroll_mode: "inherit"
-              });
-            }
-            selectedProfileKey = bundleId;
-            showAddAppForm = false;
+          listEl.innerHTML = filtered.map(a => {
+            const isRun = runningSet.has(a.bundle_id.toLowerCase());
+            const isAdded = existingBundles.has(a.bundle_id.toLowerCase());
+            return `
+              <div class="modal-app-row" data-bundle="${escapeHtml(a.bundle_id)}" data-name="${escapeHtml(a.app_name)}"
+                   style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 11px;border-radius:9px;background:var(--bg-input);border:1px solid ${isAdded ? 'rgba(59,130,246,0.4)' : 'var(--border)'};cursor:pointer;">
+                <div style="display:flex;align-items:center;gap:9px;min-width:0;">
+                  <span style="font-size:16px;">${iconForBundleId(a.bundle_id)}</span>
+                  <div style="min-width:0;">
+                    <div style="font-weight:600;font-size:12.5px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                      <span>${escapeHtml(a.app_name)}</span>
+                      ${isRun ? `<span class="badge-ok" style="font-size:10px;padding:1px 6px;">${t("mouse.badge_running_app")}</span>` : ""}
+                      ${isAdded ? `<span class="stat-sub" style="font-size:10.5px;color:var(--accent);font-weight:600;">• ${t("mouse.badge_already_added")}</span>` : ""}
+                    </div>
+                    <div class="stat-sub" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                      ${escapeHtml(a.bundle_id)}
+                    </div>
+                  </div>
+                </div>
+                <button class="btn btn-sm ${isAdded ? '' : 'btn-primary'}" style="flex-shrink:0;">
+                  ${isAdded ? "✓" : t("mouse.btn_select_this_app")}
+                </button>
+              </div>
+            `;
+          }).join("");
+
+          listEl.querySelectorAll(".modal-app-row").forEach(row => {
+            row.onclick = () => addOrSelectAppProfile(row.dataset.bundle, row.dataset.name);
           });
         };
+
+        renderModalList(modalSearchQuery);
+
+        const inpSearch = document.getElementById("inp-modal-app-search");
+        if (inpSearch) {
+          inpSearch.focus();
+          inpSearch.oninput = (e) => {
+            modalSearchQuery = e.target.value || "";
+            renderModalList(modalSearchQuery);
+          };
+        }
+
+        const btnCloseModal = document.getElementById("btn-close-app-picker-modal");
+        if (btnCloseModal) {
+          btnCloseModal.onclick = () => {
+            showAppPickerModal = false;
+            render(view);
+          };
+        }
+
+        const backdrop = document.getElementById("mouse-app-picker-backdrop");
+        if (backdrop) {
+          backdrop.onclick = (e) => {
+            if (e.target === backdrop) {
+              showAppPickerModal = false;
+              render(view);
+            }
+          };
+        }
+
+        const btnFinderPick = document.getElementById("btn-pick-finder-app");
+        if (btnFinderPick) {
+          btnFinderPick.onclick = async () => {
+            const pickRes = await api("pick_mouse_app_dialog");
+            if (pickRes && pickRes.ok && pickRes.app && pickRes.app.bundle_id) {
+              await addOrSelectAppProfile(pickRes.app.bundle_id, pickRes.app.app_name);
+            }
+          };
+        }
       }
 
       // Profile-specific controls vs Global controls
@@ -771,37 +931,39 @@ function createMouseScreen({ isTabActive } = {}) {
     }
 
     // Lightweight live polling for active Desktop (Space) count & physical mouse button press indicator
-    pollTimer = setInterval(async () => {
-      if (typeof isTabActive === "function" && !isTabActive()) {
-        stopPolling();
-        return;
-      }
-      const stRes = await api("get_mouse_state");
-      if (!stRes || !stRes.spaces) return;
-      const sp = stRes.spaces;
-      const spacesLbl = document.getElementById("lbl-spaces-live");
-      if (spacesLbl) {
-        spacesLbl.textContent = `🖥️ ${t("mouse.spaces_live", {
-          current: sp.current_space_index,
-          total: sp.total_spaces
-        })}`;
-      }
-      const btnLbl = document.getElementById("lbl-last-mouse-btn");
-      if (btnLbl && sp.last_mouse_button >= 3) {
-        btnLbl.textContent = t("mouse.last_pressed", { btn: sp.last_mouse_button });
-        if (sp.last_mouse_button_at_ms !== lastSeenBtnAt) {
-          lastSeenBtnAt = sp.last_mouse_button_at_ms;
-          btnLbl.style.borderColor = "var(--accent)";
-          btnLbl.style.color = "var(--accent)";
-          setTimeout(() => {
-            if (btnLbl) {
-              btnLbl.style.borderColor = "var(--border)";
-              btnLbl.style.color = "var(--text-muted)";
-            }
-          }, 900);
+    if (masterEnabled) {
+      pollTimer = setInterval(async () => {
+        if (typeof isTabActive === "function" && !isTabActive()) {
+          stopPolling();
+          return;
         }
-      }
-    }, 1200);
+        const stRes = await api("get_mouse_state");
+        if (!stRes || !stRes.spaces) return;
+        const sp = stRes.spaces;
+        const spacesLbl = document.getElementById("lbl-spaces-live");
+        if (spacesLbl) {
+          spacesLbl.textContent = `🖥️ ${t("mouse.spaces_live", {
+            current: sp.current_space_index,
+            total: sp.total_spaces
+          })}`;
+        }
+        const btnLbl = document.getElementById("lbl-last-mouse-btn");
+        if (btnLbl && sp.last_mouse_button >= 3) {
+          btnLbl.textContent = t("mouse.last_pressed", { btn: sp.last_mouse_button });
+          if (sp.last_mouse_button_at_ms !== lastSeenBtnAt) {
+            lastSeenBtnAt = sp.last_mouse_button_at_ms;
+            btnLbl.style.borderColor = "var(--accent)";
+            btnLbl.style.color = "var(--accent)";
+            setTimeout(() => {
+              if (btnLbl) {
+                btnLbl.style.borderColor = "var(--border)";
+                btnLbl.style.color = "var(--text-muted)";
+              }
+            }, 900);
+          }
+        }
+      }, 1200);
+    }
   }
 
   return { render, stopPolling };

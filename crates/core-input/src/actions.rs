@@ -186,6 +186,9 @@ pub fn trigger_system_action(action: &str) {
                 notify_overlay(UiOverlayEvent::TriggerFullscreenCopyScreenshot);
             }
         }
+        "open_dashboard" => {
+            notify_overlay(UiOverlayEvent::ToggleMainDashboard);
+        }
         _ => {}
     }
 }

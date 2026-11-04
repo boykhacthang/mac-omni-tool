@@ -137,10 +137,66 @@ pub struct InputAutomationConfig {
     /// Danh sách cấu hình riêng theo từng ứng dụng (Per-App Mouse Profiles)
     #[serde(default = "default_app_mouse_profiles")]
     pub app_mouse_profiles: Vec<AppMouseProfile>,
+    /// Đánh dấu đã nâng cấp danh sách mặc định sang chỉ giữ Google Chrome (loại bỏ các trình duyệt mặc định cũ)
+    #[serde(default)]
+    pub mouse_profiles_v2_chrome_only: bool,
+
+    // -------------------------------------------------------------------------
+    // Menu Bar Status Item Customization & Background Execution Mode
+    // -------------------------------------------------------------------------
+    /// Bật/tắt hiển thị biểu tượng trên thanh Menu Bar (Tắt = Ẩn Menu Bar & Chạy ngầm)
+    #[serde(default = "default_true")]
+    pub menubar_enabled: bool,
+    /// Chế độ hiển thị thông tin trên thanh Menu Bar:
+    /// "temp_cpu" (mặc định: ❖ 45°C • 12.3%), "temp_cpu_ram", "cpu_ram",
+    /// "cpu_only", "temp_only", "ram_only", "ram_gb", "net_speed", "temp_net",
+    /// "icon_only", "icon_name", "custom", "hidden"
+    #[serde(default = "default_menubar_display_mode")]
+    pub menubar_display_mode: String,
+    /// Biểu tượng hiển thị trên Menu Bar: "❖", "⌘", "⚡", "🖥️", "🎛️", "🟢", hoặc "none"
+    #[serde(default = "default_menubar_icon")]
+    pub menubar_icon: String,
+    /// Khi menubar_display_mode == "custom": Hiện nhiệt độ CPU (°C)
+    #[serde(default = "default_true")]
+    pub menubar_show_temp: bool,
+    /// Khi menubar_display_mode == "custom": Hiện % CPU
+    #[serde(default = "default_true")]
+    pub menubar_show_cpu: bool,
+    /// Khi menubar_display_mode == "custom": Hiện % RAM
+    #[serde(default)]
+    pub menubar_show_ram: bool,
+    /// Khi menubar_display_mode == "custom": Hiện tốc độ mạng (↓/↑)
+    #[serde(default)]
+    pub menubar_show_net: bool,
+    /// Chu kỳ cập nhật thông số trên Menu Bar (giây, 1..=30, mặc định 3s)
+    #[serde(default = "default_menubar_refresh_sec")]
+    pub menubar_refresh_interval_sec: u32,
+    /// Chạy ngầm khi đóng cửa sổ chính (Đóng cửa sổ ✕ hoặc Ẩn App sẽ thu về chạy ngầm)
+    #[serde(default = "default_true")]
+    pub keep_running_in_background: bool,
+    /// Phím tắt toàn cục mở nhanh Bảng điều khiển (hữu ích khi ẩn Menu Bar & chạy ngầm)
+    #[serde(default = "default_dashboard_shortcut")]
+    pub dashboard_shortcut: String,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_menubar_display_mode() -> String {
+    "temp_cpu".to_string()
+}
+
+fn default_menubar_icon() -> String {
+    "❖".to_string()
+}
+
+fn default_menubar_refresh_sec() -> u32 {
+    3
+}
+
+fn default_dashboard_shortcut() -> String {
+    "Cmd+Shift+M".to_string()
 }
 
 fn default_app_icon() -> String {
@@ -180,68 +236,16 @@ fn default_single_space_fallback() -> String {
 }
 
 pub fn default_app_mouse_profiles() -> Vec<AppMouseProfile> {
-    vec![
-        AppMouseProfile {
-            bundle_id: "com.google.Chrome".to_string(),
-            app_name: "Google Chrome".to_string(),
-            icon: "🧭".to_string(),
-            enabled: true,
-            forward_action: "default".to_string(),
-            back_action: "default".to_string(),
-            middle_action: "default".to_string(),
-            smooth_scroll_mode: "inherit".to_string(),
-        },
-        AppMouseProfile {
-            bundle_id: "com.apple.Safari".to_string(),
-            app_name: "Safari".to_string(),
-            icon: "🧭".to_string(),
-            enabled: true,
-            forward_action: "browser_forward".to_string(),
-            back_action: "browser_back".to_string(),
-            middle_action: "default".to_string(),
-            smooth_scroll_mode: "inherit".to_string(),
-        },
-        AppMouseProfile {
-            bundle_id: "company.thebrowser.Browser".to_string(),
-            app_name: "Arc Browser".to_string(),
-            icon: "🌈".to_string(),
-            enabled: true,
-            forward_action: "default".to_string(),
-            back_action: "default".to_string(),
-            middle_action: "default".to_string(),
-            smooth_scroll_mode: "inherit".to_string(),
-        },
-        AppMouseProfile {
-            bundle_id: "com.brave.Browser".to_string(),
-            app_name: "Brave Browser".to_string(),
-            icon: "🦁".to_string(),
-            enabled: true,
-            forward_action: "default".to_string(),
-            back_action: "default".to_string(),
-            middle_action: "default".to_string(),
-            smooth_scroll_mode: "inherit".to_string(),
-        },
-        AppMouseProfile {
-            bundle_id: "com.microsoft.edgemac".to_string(),
-            app_name: "Microsoft Edge".to_string(),
-            icon: "🌊".to_string(),
-            enabled: true,
-            forward_action: "default".to_string(),
-            back_action: "default".to_string(),
-            middle_action: "default".to_string(),
-            smooth_scroll_mode: "inherit".to_string(),
-        },
-        AppMouseProfile {
-            bundle_id: "org.mozilla.firefox".to_string(),
-            app_name: "Firefox".to_string(),
-            icon: "🦊".to_string(),
-            enabled: true,
-            forward_action: "default".to_string(),
-            back_action: "default".to_string(),
-            middle_action: "default".to_string(),
-            smooth_scroll_mode: "inherit".to_string(),
-        },
-    ]
+    vec![AppMouseProfile {
+        bundle_id: "com.google.Chrome".to_string(),
+        app_name: "Google Chrome".to_string(),
+        icon: "🧭".to_string(),
+        enabled: true,
+        forward_action: "default".to_string(),
+        back_action: "default".to_string(),
+        middle_action: "default".to_string(),
+        smooth_scroll_mode: "inherit".to_string(),
+    }]
 }
 
 fn default_screenshot_shortcut() -> String {
@@ -297,6 +301,17 @@ impl Default for InputAutomationConfig {
             mouse_middle_action: default_action_default(),
             single_space_fallback: default_single_space_fallback(),
             app_mouse_profiles: default_app_mouse_profiles(),
+            mouse_profiles_v2_chrome_only: true,
+            menubar_enabled: true,
+            menubar_display_mode: default_menubar_display_mode(),
+            menubar_icon: default_menubar_icon(),
+            menubar_show_temp: true,
+            menubar_show_cpu: true,
+            menubar_show_ram: false,
+            menubar_show_net: false,
+            menubar_refresh_interval_sec: default_menubar_refresh_sec(),
+            keep_running_in_background: true,
+            dashboard_shortcut: default_dashboard_shortcut(),
         }
     }
 }
@@ -374,6 +389,7 @@ impl InputAutomationConfig {
             || screenshot_any
             || !self.mission_control_shortcut.trim().is_empty()
             || !self.show_desktop_shortcut.trim().is_empty()
+            || !self.dashboard_shortcut.trim().is_empty()
     }
 
     /// Return `true` when at least one feature that requires macOS Accessibility (`AXIsProcessTrusted`) is enabled.
@@ -400,6 +416,7 @@ pub enum UiOverlayEvent {
     TriggerFullscreenEditScreenshot,
     TriggerFullscreenCopyScreenshot,
     SnapOwnWindow(String),
+    ToggleMainDashboard,
     HideAllOverlays,
 }
 
@@ -479,6 +496,42 @@ fn normalize_config(cfg: &mut InputAutomationConfig) {
     }
     if cfg.single_space_fallback.trim().is_empty() {
         cfg.single_space_fallback = default_single_space_fallback();
+    }
+
+    if !cfg.mouse_profiles_v2_chrome_only {
+        const LEGACY_BROWSERS: &[&str] = &[
+            "com.apple.Safari",
+            "company.thebrowser.Browser",
+            "com.brave.Browser",
+            "com.microsoft.edgemac",
+            "org.mozilla.firefox",
+        ];
+        cfg.app_mouse_profiles.retain(|p| {
+            !LEGACY_BROWSERS
+                .iter()
+                .any(|b| p.bundle_id.eq_ignore_ascii_case(b))
+        });
+        if cfg.app_mouse_profiles.is_empty() {
+            cfg.app_mouse_profiles = default_app_mouse_profiles();
+        }
+        cfg.mouse_profiles_v2_chrome_only = true;
+    }
+
+    cfg.dashboard_shortcut = canonicalize_shortcut(&cfg.dashboard_shortcut);
+    cfg.menubar_refresh_interval_sec = cfg.menubar_refresh_interval_sec.clamp(1, 30);
+
+    let mode = cfg.menubar_display_mode.trim().to_ascii_lowercase();
+    cfg.menubar_display_mode = match mode.as_str() {
+        "temp_cpu" | "temp_cpu_ram" | "cpu_ram" | "cpu_only" | "temp_only" | "ram_only"
+        | "ram_gb" | "net_speed" | "temp_net" | "icon_only" | "icon_name" | "custom"
+        | "hidden" => mode,
+        _ => default_menubar_display_mode(),
+    };
+    if cfg.menubar_display_mode == "hidden" {
+        cfg.menubar_enabled = false;
+    }
+    if cfg.menubar_icon.trim().is_empty() {
+        cfg.menubar_icon = default_menubar_icon();
     }
 }
 

@@ -20,7 +20,10 @@ async function initClipboardDrawer() {
             <div style="font-weight:700;font-size:14px;color:var(--accent);">📋 Clipboard</div>
             <span id="drawer-sub" class="badge-ok">0 / 1000</span>
           </div>
-          <button class="btn btn-sm" id="btn-close-drawer">✕ Esc</button>
+          <div style="display:flex;align-items:center;gap:5px;">
+            <button class="btn btn-sm" id="btn-drawer-open-dashboard" title="${t("popover.open_dashboard")}" style="padding:3px 7px;">🚀</button>
+            <button class="btn btn-sm" id="btn-close-drawer">✕ Esc</button>
+          </div>
         </div>
         <input id="drawer-search" class="input-text" placeholder="${t("clipboard.search_placeholder")}" value="${escapeHtml(searchQuery)}" style="width:100%;margin-bottom:7px;" autofocus />
         <div class="pill-tabs" style="width:100%;justify-content:space-between;">
@@ -48,6 +51,13 @@ async function initClipboardDrawer() {
     `;
 
     document.getElementById("btn-close-drawer").onclick = () => api("hide_overlay", { window: "clipboard" });
+    const openDashBtn = document.getElementById("btn-drawer-open-dashboard");
+    if (openDashBtn) {
+      openDashBtn.onclick = async () => {
+        await api("hide_overlay", { window: "clipboard" });
+        await api("show_launcher");
+      };
+    }
     document.getElementById("drawer-prev-page").onclick = () => {
       if (drawerPage > 1) {
         drawerPage -= 1;
@@ -191,5 +201,4 @@ async function initClipboardDrawer() {
   };
 
   renderDrawerShell();
-  refreshList();
 }

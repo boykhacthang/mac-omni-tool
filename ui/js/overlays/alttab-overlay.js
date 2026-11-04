@@ -130,5 +130,4 @@ async function initAltTabOverlay() {
   };
 
   renderAltTabShell();
-  loadWindows();
 }

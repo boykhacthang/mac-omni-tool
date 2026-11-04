@@ -154,18 +154,26 @@ cargo run
 
 ---
 
-## ☕ Ủng Hộ Tác Giả (Support me on Ko-fi)
+## ☕ Ủng Hộ Tác Giả (Donate / Support)
 
-Nếu **Mac Omni Tool** giúp công việc hàng ngày trên máy Mac của bạn tiện lợi hơn, bạn có thể ủng hộ tác giả **boykhacthang** qua **Ko-fi** để tiếp thêm động lực phát triển thêm nhiều tính năng mới:
+Nếu **Mac Omni Tool** giúp công việc hàng ngày trên máy Mac của bạn tiện lợi hơn, bạn có thể ủng hộ tác giả **boykhacthang** (**Đào Khắc Thắng**) qua **VietQR** hoặc **Ko-fi** để tiếp thêm động lực phát triển thêm nhiều tính năng mới:
+
+### 🇻🇳 Quét mã VietQR (Ngân hàng tại Việt Nam)
+
+<p align="left">
+  <img src="assets/vietqr-donate.png" alt="VietQR Donate - DAO KHAC THANG" width="220" />
+</p>
+
+- 🏦 **Ngân hàng**: Vietcombank (`970436`)
+- 👤 **Chủ tài khoản**: **DAO KHAC THANG** (`thangdk`)
+- 💬 **Nội dung**: `thank for mac omni`
+
+### 🌍 Quốc tế (Ko-fi)
 
 [![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/I1R72A1475)
 
 - ☕ **Ko-fi**: [https://ko-fi.com/I1R72A1475](https://ko-fi.com/I1R72A1475)
 - ⭐ **Tặng 1 Star trên GitHub** để lan tỏa dự án tới cộng đồng macOS!
-
-```html
-<script type='text/javascript' src='https://storage.ko-fi.com/cdn/widget/Widget_2.js'></script><script type='text/javascript'>kofiwidget2.init('Support me on Ko-fi', '#72a4f2', 'I1R72A1475');kofiwidget2.draw();</script>
-```
 
 ---
 

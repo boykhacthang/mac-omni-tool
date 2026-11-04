@@ -283,3 +283,123 @@ pub fn list_running_gui_apps() -> Vec<RunningAppItem> {
         list
     }
 }
+
+/// Read `bundle_id` and display `app_name` from a `.app` bundle directory on disk via `NSBundle`.
+pub fn read_app_bundle_info(app_path: &std::path::Path) -> Option<RunningAppItem> {
+    if !app_path.exists() {
+        return None;
+    }
+    let path_str = app_path.to_str()?;
+    let c_path = std::ffi::CString::new(path_str).ok()?;
+    let fallback_name = app_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("App")
+        .to_string();
+
+    unsafe {
+        let pool = objc_autoreleasePoolPush();
+        let bundle_cls = objc_getClass(c"NSBundle".as_ptr());
+        if bundle_cls.is_null() {
+            objc_autoreleasePoolPop(pool);
+            return None;
+        }
+        type Msg1 = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> *mut c_void;
+        type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+        let msg1: Msg1 = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg0: Msg0 = std::mem::transmute(objc_msgSend as *const c_void);
+
+        let ns_path = nsstring_from_cstr(c_path.as_ptr());
+        if ns_path.is_null() {
+            objc_autoreleasePoolPop(pool);
+            return None;
+        }
+        let sel_bundle_with_path = sel_registerName(c"bundleWithPath:".as_ptr());
+        let bundle = msg1(bundle_cls, sel_bundle_with_path, ns_path);
+        if bundle.is_null() {
+            objc_autoreleasePoolPop(pool);
+            return None;
+        }
+
+        let sel_id = sel_registerName(c"bundleIdentifier".as_ptr());
+        let bundle_id = nsstring_to_rust(msg0(bundle, sel_id)).unwrap_or_default();
+        let b_trim = bundle_id.trim().to_string();
+        if b_trim.is_empty() {
+            objc_autoreleasePoolPop(pool);
+            return None;
+        }
+
+        let sel_obj_for_info = sel_registerName(c"objectForInfoDictionaryKey:".as_ptr());
+        let key_disp = nsstring_from_cstr(c"CFBundleDisplayName".as_ptr());
+        let key_name = nsstring_from_cstr(c"CFBundleName".as_ptr());
+
+        let mut app_name = nsstring_to_rust(msg1(bundle, sel_obj_for_info, key_disp))
+            .filter(|s| !s.trim().is_empty());
+        if app_name.is_none() {
+            app_name = nsstring_to_rust(msg1(bundle, sel_obj_for_info, key_name))
+                .filter(|s| !s.trim().is_empty());
+        }
+        let final_name = app_name.unwrap_or(fallback_name);
+
+        objc_autoreleasePoolPop(pool);
+        Some(RunningAppItem {
+            bundle_id: b_trim,
+            app_name: final_name,
+        })
+    }
+}
+
+/// Scan standard macOS application directories (`/Applications`, `/System/Applications`, `~/Applications`)
+/// and return all installed GUI `.app` bundles with their real `bundle_id` and `app_name`.
+pub fn list_installed_gui_apps() -> Vec<RunningAppItem> {
+    let mut dirs = vec![
+        std::path::PathBuf::from("/Applications"),
+        std::path::PathBuf::from("/Applications/Utilities"),
+        std::path::PathBuf::from("/System/Applications"),
+        std::path::PathBuf::from("/System/Applications/Utilities"),
+    ];
+    if let Ok(home) = std::env::var("HOME") {
+        dirs.push(std::path::PathBuf::from(home).join("Applications"));
+    }
+
+    let mut by_bundle: BTreeMap<String, RunningAppItem> = BTreeMap::new();
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("app") {
+                if let Some(item) = read_app_bundle_info(&path) {
+                    by_bundle
+                        .entry(item.bundle_id.to_lowercase())
+                        .or_insert(item);
+                }
+            }
+        }
+    }
+
+    let mut list: Vec<RunningAppItem> = by_bundle.into_values().collect();
+    list.sort_by(|a, b| a.app_name.to_lowercase().cmp(&b.app_name.to_lowercase()));
+    list
+}
+
+/// Open the native macOS Finder file dialog to pick an installed `.app` bundle from `/Applications`.
+pub fn pick_application_bundle_dialog() -> Option<RunningAppItem> {
+    let out = std::process::Command::new("osascript")
+        .args([
+            "-e",
+            r#"POSIX path of (choose file of type {"app", "com.apple.application-bundle"} with prompt "Chọn ứng dụng (.app):" default location (POSIX file "/Applications"))"#,
+        ])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let raw_path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if raw_path.is_empty() {
+        return None;
+    }
+    let clean_path = raw_path.trim_end_matches('/');
+    read_app_bundle_info(std::path::Path::new(clean_path))
+}

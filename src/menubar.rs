@@ -9,6 +9,7 @@ use std::sync::{Mutex, OnceLock};
 use tao::event_loop::EventLoopProxy;
 
 static MENUBAR_EVENT_PROXY: OnceLock<Mutex<Option<EventLoopProxy<AppUserEvent>>>> = OnceLock::new();
+static STATUS_ITEM_PTR: AtomicIsize = AtomicIsize::new(0);
 static STATUS_BUTTON_PTR: AtomicIsize = AtomicIsize::new(0);
 static TARGET_OBJ_PTR: AtomicIsize = AtomicIsize::new(0);
 
@@ -416,6 +417,175 @@ pub fn update_status_bar_title(title: &str) {
     }
 }
 
+pub unsafe fn set_status_item_visible(status_item: *mut c_void, visible: bool) {
+    if status_item.is_null() {
+        return;
+    }
+    let pool = objc_autoreleasePoolPush();
+    type Msg1Bool = unsafe extern "C" fn(*mut c_void, *mut c_void, bool);
+    let msg1_bool: Msg1Bool = std::mem::transmute(objc_msgSend as *const c_void);
+    let sel_set_visible = sel_registerName(c"setVisible:".as_ptr());
+    msg1_bool(status_item, sel_set_visible, visible);
+    objc_autoreleasePoolPop(pool);
+}
+
+pub fn set_status_bar_visible(visible: bool) {
+    let ptr = STATUS_ITEM_PTR.load(Ordering::SeqCst) as *mut c_void;
+    unsafe {
+        set_status_item_visible(ptr, visible);
+    }
+}
+
+pub fn format_compact_net_rate(bytes_per_sec: u64) -> String {
+    if bytes_per_sec < 1024 {
+        "0 KB/s".to_string()
+    } else if bytes_per_sec < 1024 * 1024 {
+        format!("{:.0} KB/s", (bytes_per_sec as f64 / 1024.0).round())
+    } else if bytes_per_sec < 1024 * 1024 * 1024 {
+        format!("{:.1} MB/s", bytes_per_sec as f64 / (1024.0 * 1024.0))
+    } else {
+        format!(
+            "{:.1} GB/s",
+            bytes_per_sec as f64 / (1024.0 * 1024.0 * 1024.0)
+        )
+    }
+}
+
+pub fn menubar_mode_needs_live_stats(cfg: &core_input::InputAutomationConfig) -> bool {
+    if !cfg.menubar_enabled || cfg.menubar_display_mode == "hidden" {
+        return false;
+    }
+    match cfg.menubar_display_mode.as_str() {
+        "icon_only" | "icon_name" => false,
+        "custom" => {
+            cfg.menubar_show_temp
+                || cfg.menubar_show_cpu
+                || cfg.menubar_show_ram
+                || cfg.menubar_show_net
+        }
+        _ => true,
+    }
+}
+
+pub fn format_menubar_title(
+    cfg: &core_input::InputAutomationConfig,
+    stats: &core_monitor::MenuBarQuickStats,
+) -> String {
+    let raw_icon = cfg.menubar_icon.trim();
+    let icon = if raw_icon.eq_ignore_ascii_case("none") || raw_icon.is_empty() {
+        ""
+    } else {
+        raw_icon
+    };
+
+    let with_prefix = |body: &str| -> String {
+        if body.is_empty() {
+            if icon.is_empty() {
+                "❖".to_string()
+            } else {
+                icon.to_string()
+            }
+        } else if icon.is_empty() {
+            body.to_string()
+        } else {
+            format!("{} {}", icon, body)
+        }
+    };
+
+    let temp_str = format!("{:.0}°C", stats.cpu_temp_c.round().max(30.0));
+    let cpu_pct_str = format!("{:.1}%", stats.cpu_usage_percent.max(0.0));
+    let ram_pct_str = format!("{:.0}%", stats.memory_usage_percent.round().max(0.0));
+    let used_gb = stats.used_memory_bytes as f64 / 1_073_741_824.0;
+    let total_gb = (stats.total_memory_bytes as f64 / 1_073_741_824.0)
+        .round()
+        .max(1.0) as u64;
+
+    match cfg.menubar_display_mode.as_str() {
+        "icon_only" => with_prefix(""),
+        "icon_name" => {
+            if icon.is_empty() {
+                "Omni".to_string()
+            } else {
+                format!("{} Omni", icon)
+            }
+        }
+        "temp_only" => with_prefix(&temp_str),
+        "cpu_only" => with_prefix(&cpu_pct_str),
+        "ram_only" => with_prefix(&format!("RAM {}", ram_pct_str)),
+        "ram_gb" => with_prefix(&format!("{:.1}/{} GB", used_gb, total_gb)),
+        "cpu_ram" => with_prefix(&format!("CPU {} • RAM {}", cpu_pct_str, ram_pct_str)),
+        "temp_cpu_ram" => with_prefix(&format!(
+            "{} • CPU {:.0}% • RAM {}",
+            temp_str,
+            stats.cpu_usage_percent.round().max(0.0),
+            ram_pct_str
+        )),
+        "net_speed" => with_prefix(&format!(
+            "↓ {} ↑ {}",
+            format_compact_net_rate(stats.net_rx_bytes_per_sec),
+            format_compact_net_rate(stats.net_tx_bytes_per_sec)
+        )),
+        "temp_net" => with_prefix(&format!(
+            "{} • ↓ {}",
+            temp_str,
+            format_compact_net_rate(stats.net_rx_bytes_per_sec)
+        )),
+        "custom" => {
+            let mut parts = Vec::new();
+            if cfg.menubar_show_temp {
+                parts.push(temp_str);
+            }
+            if cfg.menubar_show_cpu {
+                if cfg.menubar_show_ram {
+                    parts.push(format!(
+                        "CPU {:.0}%",
+                        stats.cpu_usage_percent.round().max(0.0)
+                    ));
+                } else {
+                    parts.push(cpu_pct_str);
+                }
+            }
+            if cfg.menubar_show_ram {
+                parts.push(format!("RAM {}", ram_pct_str));
+            }
+            if cfg.menubar_show_net {
+                parts.push(format!(
+                    "↓ {} ↑ {}",
+                    format_compact_net_rate(stats.net_rx_bytes_per_sec),
+                    format_compact_net_rate(stats.net_tx_bytes_per_sec)
+                ));
+            }
+            with_prefix(&parts.join(" • "))
+        }
+        _ => with_prefix(&format!("{} • {}", temp_str, cpu_pct_str)),
+    }
+}
+
+pub fn sync_menubar_from_config(cfg: &core_input::InputAutomationConfig) -> (bool, String) {
+    let visible = cfg.menubar_enabled && cfg.menubar_display_mode != "hidden";
+    set_status_bar_visible(visible);
+    if !visible {
+        return (false, String::new());
+    }
+    let stats = if menubar_mode_needs_live_stats(cfg) {
+        core_monitor::get_menubar_stats()
+    } else {
+        core_monitor::MenuBarQuickStats {
+            cpu_usage_percent: 0.0,
+            memory_usage_percent: 0.0,
+            used_memory_bytes: 0,
+            total_memory_bytes: 16 * 1024 * 1024 * 1024,
+            cpu_temp_c: 45.0,
+            gpu_temp_c: 42.0,
+            net_rx_bytes_per_sec: 0,
+            net_tx_bytes_per_sec: 0,
+        }
+    };
+    let title = format_menubar_title(cfg, &stats);
+    update_status_bar_title(&title);
+    (true, title)
+}
+
 /// Create a native macOS NSStatusItem in the top Menu Bar right next to the Battery % icon
 pub fn init_native_macos_menubar_item(proxy: EventLoopProxy<AppUserEvent>) {
     unsafe {
@@ -490,6 +660,7 @@ pub fn init_native_macos_menubar_item(proxy: EventLoopProxy<AppUserEvent>) {
             -1.0,
         );
         let _ = msg0(status_item, sel_registerName(c"retain".as_ptr()));
+        STATUS_ITEM_PTR.store(status_item as isize, Ordering::SeqCst);
 
         let button = msg0(status_item, sel_registerName(c"button".as_ptr()));
         if !button.is_null() {
@@ -509,6 +680,82 @@ pub fn init_native_macos_menubar_item(proxy: EventLoopProxy<AppUserEvent>) {
 
         setup_macos_application_menu();
         objc_autoreleasePoolPop(pool);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_stats() -> core_monitor::MenuBarQuickStats {
+        core_monitor::MenuBarQuickStats {
+            cpu_usage_percent: 14.2,
+            memory_usage_percent: 62.4,
+            used_memory_bytes: 10 * 1024 * 1024 * 1024,
+            total_memory_bytes: 16 * 1024 * 1024 * 1024,
+            cpu_temp_c: 48.0,
+            gpu_temp_c: 44.0,
+            net_rx_bytes_per_sec: 1_572_864, // 1.5 MB/s
+            net_tx_bytes_per_sec: 51_200,    // 50 KB/s
+        }
+    }
+
+    #[test]
+    fn test_format_menubar_title_all_modes() {
+        let stats = sample_stats();
+        let mut cfg = core_input::InputAutomationConfig::default();
+
+        assert_eq!(format_menubar_title(&cfg, &stats), "❖ 48°C • 14.2%");
+
+        cfg.menubar_display_mode = "icon_only".to_string();
+        assert_eq!(format_menubar_title(&cfg, &stats), "❖");
+
+        cfg.menubar_display_mode = "icon_name".to_string();
+        assert_eq!(format_menubar_title(&cfg, &stats), "❖ Omni");
+
+        cfg.menubar_display_mode = "cpu_only".to_string();
+        assert_eq!(format_menubar_title(&cfg, &stats), "❖ 14.2%");
+
+        cfg.menubar_display_mode = "temp_only".to_string();
+        assert_eq!(format_menubar_title(&cfg, &stats), "❖ 48°C");
+
+        cfg.menubar_display_mode = "ram_only".to_string();
+        assert_eq!(format_menubar_title(&cfg, &stats), "❖ RAM 62%");
+
+        cfg.menubar_display_mode = "ram_gb".to_string();
+        assert_eq!(format_menubar_title(&cfg, &stats), "❖ 10.0/16 GB");
+
+        cfg.menubar_display_mode = "cpu_ram".to_string();
+        assert_eq!(
+            format_menubar_title(&cfg, &stats),
+            "❖ CPU 14.2% • RAM 62%"
+        );
+
+        cfg.menubar_display_mode = "temp_cpu_ram".to_string();
+        assert_eq!(
+            format_menubar_title(&cfg, &stats),
+            "❖ 48°C • CPU 14% • RAM 62%"
+        );
+
+        cfg.menubar_display_mode = "net_speed".to_string();
+        assert_eq!(
+            format_menubar_title(&cfg, &stats),
+            "❖ ↓ 1.5 MB/s ↑ 50 KB/s"
+        );
+
+        // Test with no icon ("none")
+        cfg.menubar_icon = "none".to_string();
+        cfg.menubar_display_mode = "temp_cpu".to_string();
+        assert_eq!(format_menubar_title(&cfg, &stats), "48°C • 14.2%");
+
+        // Test custom mode
+        cfg.menubar_icon = "⚡".to_string();
+        cfg.menubar_display_mode = "custom".to_string();
+        cfg.menubar_show_temp = true;
+        cfg.menubar_show_cpu = false;
+        cfg.menubar_show_ram = true;
+        cfg.menubar_show_net = false;
+        assert_eq!(format_menubar_title(&cfg, &stats), "⚡ 48°C • RAM 62%");
     }
 }
 
