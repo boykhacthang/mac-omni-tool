@@ -1,0 +1,41 @@
+[workspace]
+resolver = "2"
+members = [
+    ".",
+    "crates/core-display",
+    "crates/core-monitor",
+    "crates/core-clipboard",
+    "crates/core-window",
+    "crates/core-input",
+    "crates/core-cleaner",
+]
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+libc = "0.2"
+sysinfo = "0.31"
+rayon = "1.10"
+
+[package]
+name = "mac-omni-tool"
+version = "2.0.0"
+edition = "2021"
+authors = ["boykhacthang"]
+license = "MIT"
+repository = "https://github.com/boykhacthang/mac-omni-tool"
+description = "All-in-One Native macOS Utility (Free Community Edition) built in Rust"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+libc.workspace = true
+tao = "0.30"
+wry = "0.47"
+core-display = { path = "crates/core-display" }
+core-monitor = { path = "crates/core-monitor" }
+core-clipboard = { path = "crates/core-clipboard" }
+core-window = { path = "crates/core-window" }
+core-input = { path = "crates/core-input" }
+core-cleaner = { path = "crates/core-cleaner" }
+

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mac Omni</title>
+  <link rel="stylesheet" href="/styles/base.css" />
+  <link rel="stylesheet" href="/styles/screens.css" />
+  <link rel="stylesheet" href="/styles/overlays.css" />
+</head>
+
+<body>
+  <div id="root"></div>
+  <div id="toast" class="toast-banner"></div>
+
+  <!-- Core RPC, Locale Dictionaries, Multi-Language (i18n) & Shared UI Components -->
+  <script src="/js/core/api.js"></script>
+  <script src="/js/locales/en.js"></script>
+  <script src="/js/locales/vi.js"></script>
+  <script src="/js/core/i18n.js"></script>
+  <script src="/js/components/clipboard-card.js"></script>
+  <script src="/js/components/path-cell.js"></script>
+
+  <!-- Standalone Dashboard Screen Modules -->
+  <script src="/js/screens/display-audio.js"></script>
+  <script src="/js/screens/hardware-monitor.js"></script>
+  <script src="/js/screens/clipboard-tab.js"></script>
+  <script src="/js/screens/window-tiling.js"></script>
+  <script src="/js/screens/mouse.js"></script>
+  <script src="/js/screens/system-cleaner.js"></script>
+  <script src="/js/screens/settings.js"></script>
+
+  <!-- Standalone Overlay Window Modules -->
+  <script src="/js/overlays/menubar-popover.js"></script>
+  <script src="/js/overlays/clipboard-drawer.js"></script>
+  <script src="/js/overlays/alttab-overlay.js"></script>
+  <script src="/js/overlays/screenshot-overlay.js"></script>
+
+  <!-- Main Dashboard Shell & Mode Router -->
+  <script src="/js/app.js"></script>
+</body>
+
+</html>

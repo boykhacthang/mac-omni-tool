@@ -1,0 +1,473 @@
+/* Full Clipboard Card (Full Text & Full Image) */
+.drawer-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  background: var(--bg-app);
+  border: 1.5px solid var(--accent);
+  border-radius: 14px;
+  padding: 12px;
+  overflow: hidden;
+}
+
+.clip-list-viewport {
+  flex: 1;
+  overflow-y: auto;
+  position: relative;
+  margin-top: 8px;
+}
+
+.clip-card {
+  border-radius: 9px;
+  border: 1.5px solid var(--border);
+  background: var(--bg-card);
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.clip-card:hover,
+.clip-card.selected {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.clip-full-text {
+  font-size: 12.5px;
+  line-height: 1.48;
+  color: var(--text-main);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  margin-top: 6px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.clip-full-img {
+  display: block;
+  max-width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  margin-top: 6px;
+}
+
+/* Windows-Style Alt-Tab HUD Overlay (Respects Light & Dark Theme) */
+.win-alttab-backdrop {
+  height: 100vh;
+  width: 100vw;
+  background: var(--bg-app);
+  border: 2px solid var(--accent);
+  border-radius: 14px;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  color: var(--text-main);
+  box-shadow: var(--shadow);
+}
+
+.win-alttab-selected-title {
+  text-align: center;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 16px;
+}
+
+.win-alttab-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(235px, 1fr));
+  gap: 12px;
+  overflow-y: auto;
+  padding: 4px;
+  flex: 1;
+  align-content: center;
+}
+
+.win-alttab-card {
+  background: var(--bg-card);
+  border: 2px solid var(--border);
+  border-radius: 9px;
+  padding: 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: all 0.1s ease;
+}
+
+.win-alttab-card:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--text-muted);
+}
+
+.win-alttab-card.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.28);
+}
+
+.win-alttab-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.win-alttab-app-badge {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.win-alttab-thumb {
+  width: 100%;
+  height: 132px;
+  object-fit: contain;
+  background: var(--bg-input);
+  border-radius: 5px;
+  border: 1px solid var(--border);
+}
+
+/* Menu Bar Popover Mode (Fits Popup Frame cleanly without outer scroll) */
+.mini-dropdown-panel {
+  width: 100vw;
+  height: 100vh;
+  background: var(--bg-app);
+  border: 1.5px solid var(--accent);
+  border-radius: 14px;
+  padding: 10px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.mini-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+}
+
+.mini-section-card {
+  background: var(--bg-card);
+  padding: 7px 9px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.mini-range {
+  display: block;
+  width: 100%;
+  height: 14px;
+  margin: 0;
+}
+
+.mini-audio-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 118px;
+  overflow-y: auto;
+}
+
+.mini-audio-dev {
+  padding: 4px 8px !important;
+  gap: 7px !important;
+  border-radius: 7px !important;
+  min-height: 26px;
+}
+
+.mini-mouse-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex-wrap: nowrap;
+  padding: 6px 9px;
+}
+
+.mini-mouse-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.mini-mouse-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-wrap: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.mini-mouse-actions .btn {
+  padding: 2px 7px;
+  height: 24px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* =========================================================================
+   MULTI-MONITOR SCREENSHOT & ANNOTATION OVERLAY STYLES
+   ========================================================================= */
+.ls-root {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.ls-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+  cursor: crosshair;
+  image-rendering: -webkit-optimize-contrast;
+}
+
+.ls-top-hint {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.90);
+  border: 1px solid rgba(255, 255, 255, 0.20);
+  color: #f8fafc;
+  padding: 6px 14px;
+  border-radius: 99px;
+  font-size: 12.2px;
+  font-weight: 500;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 25;
+  backdrop-filter: blur(8px);
+  white-space: nowrap;
+}
+
+.ls-size-pill {
+  position: fixed;
+  background: rgba(15, 23, 42, 0.92);
+  color: #f8fafc;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 25;
+  display: none;
+  white-space: nowrap;
+}
+
+.ls-toolbar-vert {
+  position: fixed;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  background: rgba(17, 24, 39, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 9px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+  z-index: 30;
+  backdrop-filter: blur(10px);
+}
+
+.ls-toolbar-horiz {
+  position: fixed;
+  display: none;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 7px;
+  background: rgba(17, 24, 39, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 9px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+  z-index: 30;
+  backdrop-filter: blur(10px);
+}
+
+.ls-tool-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #e2e8f0;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.ls-tool-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.ls-tool-btn.active {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: #ef4444;
+  color: #fff;
+}
+
+.ls-action-btn {
+  height: 29px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.10);
+  color: #f8fafc;
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  white-space: nowrap;
+}
+
+.ls-action-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #ffffff;
+}
+
+.ls-action-btn.ls-icon-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 7px;
+}
+
+.ls-action-btn.ls-icon-btn svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+  pointer-events: none;
+}
+
+.ls-action-btn.primary {
+  background: #2563eb;
+  border-color: #3b82f6;
+  color: #fff;
+}
+
+.ls-action-btn.primary:hover {
+  background: #1d4ed8;
+}
+
+.ls-action-btn.danger {
+  background: #ef4444;
+  border-color: #f87171;
+  color: #fff;
+}
+
+.ls-action-btn.danger:hover {
+  background: #dc2626;
+  border-color: #ef4444;
+}
+
+.ls-color-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.ls-color-dot.active {
+  border-color: #fff;
+  transform: scale(1.22);
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.55);
+}
+
+.ls-stroke-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.ls-stroke-dot.active {
+  border-color: rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.ls-text-editor {
+  position: fixed;
+  display: none;
+  z-index: 40;
+  min-width: 140px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  border: 1.5px dashed #ef4444;
+  background: rgba(15, 23, 42, 0.86);
+  color: #ef4444;
+  font-weight: 700;
+  font-size: 18px;
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+}

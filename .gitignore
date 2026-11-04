@@ -1,0 +1,28 @@
+# Rust / Cargo build artifacts
+target/
+**/target/
+**/*.rs.bk
+*.pdb
+
+# macOS App bundles & system files
+*.app/
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Local databases, logs & temp files
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.log
+*.tmp
+*.swp
+
+# IDE & Editor folders
+.idea/
+.vscode/
+*.iml
+
