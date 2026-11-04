@@ -252,9 +252,15 @@ fn compute_file_sha256(path: &Path) -> Result<String, String> {
 }
 
 fn is_allowed_update_url(url: &str) -> bool {
+    if url.contains("..") || url.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return false;
+    }
     url.starts_with("https://github.com/boykhacthang/mac-omni-tool/")
         || url.starts_with("https://raw.githubusercontent.com/boykhacthang/mac-omni-tool/")
-        || url.starts_with("https://objects.githubusercontent.com/")
+}
+
+fn is_valid_sha256_hex(s: &str) -> bool {
+    s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Downloads the release `.zip` archive, verifies its SHA-256 (if provided),
@@ -264,6 +270,11 @@ fn is_allowed_update_url(url: &str) -> bool {
 pub fn download_and_install_update(zip_url: &str, expected_sha256: &str) -> Result<String, String> {
     if !is_allowed_update_url(zip_url) {
         return Err("Untrusted update URL. Only official GitHub URLs are allowed.".to_string());
+    }
+
+    let expected_clean = expected_sha256.trim().to_lowercase();
+    if !expected_clean.is_empty() && !is_valid_sha256_hex(&expected_clean) {
+        return Err("Invalid SHA-256 checksum format.".to_string());
     }
 
     let target_app = detect_current_app_bundle_path()
@@ -294,7 +305,6 @@ pub fn download_and_install_update(zip_url: &str, expected_sha256: &str) -> Resu
     }
 
     // 2. Verify SHA-256 checksum if provided
-    let expected_clean = expected_sha256.trim().to_lowercase();
     if !expected_clean.is_empty() {
         let actual_sha = compute_file_sha256(&zip_path)?;
         if actual_sha != expected_clean {
@@ -343,28 +353,33 @@ pub fn download_and_install_update(zip_url: &str, expected_sha256: &str) -> Resu
         .arg(&extracted_app)
         .status();
 
-    // 5. Spawn detached shell script to update the .app bundle in-place (via ditto to preserve TCC & bundle inode) & relaunch
+    // 5. Spawn detached shell script using positional arguments ($1, $2, $3) to prevent shell injection
     let script_path = staging_dir.join("apply_update.sh");
-    let script_content = format!(
-        "#!/usr/bin/env zsh\n\
-         sleep 0.6\n\
-         mkdir -p {target:?}\n\
-         ditto {source:?} {target:?}\n\
-         xattr -cr {target:?} 2>/dev/null || true\n\
-         codesign --force --deep --sign - --identifier \"com.khacthang.mac-omni-tool\" -r='designated => identifier \"com.khacthang.mac-omni-tool\"' {target:?} 2>/dev/null || true\n\
-         /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f {target:?} 2>/dev/null || true\n\
-         touch {target:?}\n\
-         open {target:?}\n\
-         rm -rf {staging:?} 2>/dev/null || true\n",
-        target = target_app,
-        source = extracted_app,
-        staging = staging_dir
-    );
+    let script_content = "\
+#!/usr/bin/env zsh\n\
+TARGET_APP=\"$1\"\n\
+SOURCE_APP=\"$2\"\n\
+STAGING_DIR=\"$3\"\n\
+if [[ -z \"$TARGET_APP\" || -z \"$SOURCE_APP\" || -z \"$STAGING_DIR\" ]]; then\n\
+  exit 1\n\
+fi\n\
+sleep 0.6\n\
+mkdir -p \"$TARGET_APP\"\n\
+ditto \"$SOURCE_APP\" \"$TARGET_APP\"\n\
+xattr -cr \"$TARGET_APP\" 2>/dev/null || true\n\
+codesign --force --deep --sign - --identifier \"com.khacthang.mac-omni-tool\" -r='designated => identifier \"com.khacthang.mac-omni-tool\"' \"$TARGET_APP\" 2>/dev/null || true\n\
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f \"$TARGET_APP\" 2>/dev/null || true\n\
+touch \"$TARGET_APP\"\n\
+open \"$TARGET_APP\"\n\
+rm -rf \"$STAGING_DIR\" 2>/dev/null || true\n";
     std::fs::write(&script_path, script_content)
         .map_err(|e| format!("Failed to write update helper script: {}", e))?;
 
     Command::new("/bin/zsh")
         .arg(&script_path)
+        .arg(&target_app)
+        .arg(&extracted_app)
+        .arg(&staging_dir)
         .spawn()
         .map_err(|e| format!("Failed to launch update helper script: {}", e))?;
 
@@ -394,5 +409,9 @@ mod tests {
             "https://raw.githubusercontent.com/boykhacthang/mac-omni-tool/main/releases/v2.0.0/MacOmniTool-v2.0.0-macOS.zip"
         ));
         assert!(!is_allowed_update_url("https://evil.example.com/MacOmniTool.zip"));
+        assert!(!is_allowed_update_url("https://objects.githubusercontent.com/arbitrary-repo/file.zip"));
+        assert!(!is_allowed_update_url("https://github.com/boykhacthang/mac-omni-tool/../other/file.zip"));
+        assert!(is_valid_sha256_hex("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"));
+        assert!(!is_valid_sha256_hex("not-a-valid-sha256"));
     }
 }

@@ -55,6 +55,9 @@ pub(crate) fn notify_overlay(ev: UiOverlayEvent) {
 
 /// Synthesize a hardware-level keyboard shortcut (tagged with `OMNI_SYNTHETIC_EVENT_TAG` so our own event tap ignores it).
 pub fn post_synthetic_key_combo(keycode: u16, modifier_flags: u64) {
+    if !core_window::is_accessibility_trusted() {
+        return;
+    }
     std::thread::spawn(move || unsafe {
         let src = CGEventSourceCreate(K_CG_EVENT_SOURCE_STATE_HID_SYSTEM_STATE);
         let down = CGEventCreateKeyboardEvent(src, keycode, true);
@@ -164,25 +167,34 @@ pub fn trigger_system_action(action: &str) {
             }
         }
         "alt_tab" => {
-            if get_input_config().replace_macos_cmd_tab {
+            if get_input_config().replace_macos_cmd_tab && core_window::is_accessibility_trusted() {
                 notify_overlay(UiOverlayEvent::ToggleAltTabOverlay);
             }
         }
         "screenshot" | "screenshot_region" => {
             let cfg = get_input_config();
-            if cfg.screenshot_enabled && cfg.screenshot_region_enabled {
+            if cfg.screenshot_enabled
+                && cfg.screenshot_region_enabled
+                && core_window::is_screen_recording_granted()
+            {
                 notify_overlay(UiOverlayEvent::TriggerScreenshotOverlay);
             }
         }
         "screenshot_full_edit" => {
             let cfg = get_input_config();
-            if cfg.screenshot_enabled && cfg.screenshot_fullscreen_edit_enabled {
+            if cfg.screenshot_enabled
+                && cfg.screenshot_fullscreen_edit_enabled
+                && core_window::is_screen_recording_granted()
+            {
                 notify_overlay(UiOverlayEvent::TriggerFullscreenEditScreenshot);
             }
         }
         "screenshot_full_copy" => {
             let cfg = get_input_config();
-            if cfg.screenshot_enabled && cfg.screenshot_fullscreen_copy_enabled {
+            if cfg.screenshot_enabled
+                && cfg.screenshot_fullscreen_copy_enabled
+                && core_window::is_screen_recording_granted()
+            {
                 notify_overlay(UiOverlayEvent::TriggerFullscreenCopyScreenshot);
             }
         }

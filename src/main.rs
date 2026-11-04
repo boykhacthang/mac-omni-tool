@@ -42,7 +42,6 @@ fn main() {
     let initial_cfg = core_input::get_input_config();
     core_clipboard::set_clipboard_enabled(initial_cfg.clipboard_enabled);
     core_clipboard::start_clipboard_watcher();
-    core_cleaner::prewarm_cleaner_cache();
     std::thread::spawn(|| {
         core_window::register_current_app_with_launch_services();
     });
@@ -507,7 +506,9 @@ fn main() {
                     }
                 }
                 AppUserEvent::ToggleAltTabOverlay => {
-                    if !core_input::get_input_config().replace_macos_cmd_tab {
+                    if !core_input::get_input_config().replace_macos_cmd_tab
+                        || !core_window::is_accessibility_trusted()
+                    {
                         if alttab_window.is_visible() {
                             unsafe {
                                 hide_floating_overlay_window(&alttab_window);
@@ -564,6 +565,10 @@ fn main() {
                         || (instant_copy && !cfg.screenshot_fullscreen_copy_enabled)
                         || (!instant_copy && !cfg.screenshot_fullscreen_edit_enabled)
                     {
+                        return;
+                    }
+                    if !core_window::is_screen_recording_granted() {
+                        let _ = proxy.send_event(AppUserEvent::ScreenshotCaptureFailed);
                         return;
                     }
                     if screenshot_windows.iter().any(|w| w.is_visible()) {
@@ -687,6 +692,10 @@ fn main() {
                 AppUserEvent::TriggerScreenshotOverlay => {
                     let cfg = core_input::get_input_config();
                     if !cfg.screenshot_enabled || !cfg.screenshot_region_enabled {
+                        return;
+                    }
+                    if !core_window::is_screen_recording_granted() {
+                        let _ = proxy.send_event(AppUserEvent::ScreenshotCaptureFailed);
                         return;
                     }
                     if screenshot_windows.iter().any(|w| w.is_visible()) {
@@ -904,7 +913,23 @@ fn main() {
                     }
                 }
                 AppUserEvent::ScreenshotCaptureFailed => {
-                    core_window::request_or_open_permission("screen_recording");
+                    if mini_window.is_visible() {
+                        unsafe {
+                            hide_floating_overlay_window(&mini_window);
+                        }
+                    }
+                    unsafe {
+                        set_macos_dock_icon_visible(true);
+                        if !main_window.is_visible() {
+                            place_main_window_center_75_full_height(&main_window);
+                        }
+                        setup_macos_application_menu();
+                    }
+                    main_window.set_visible(true);
+                    main_window.set_focus();
+                    let _ = main_webview.evaluate_script(
+                        "window.openPermissionsSettings && window.openPermissionsSettings('screen_recording');",
+                    );
                 }
                 AppUserEvent::FullscreenInstantCopied { display_name } => {
                     let safe_en = serde_json::to_string(&format!(
@@ -1103,6 +1128,18 @@ fn main() {
                 }
                 main_window.set_visible(true);
                 main_window.set_focus();
+            }
+            Event::WindowEvent {
+                window_id,
+                event: WindowEvent::Focused(true),
+                ..
+            } => {
+                if window_id == main_id {
+                    core_input::notify_permissions_changed();
+                    let _ = main_webview.evaluate_script(
+                        "window.__onMainWindowFocused && window.__onMainWindowFocused();",
+                    );
+                }
             }
             Event::WindowEvent {
                 window_id,

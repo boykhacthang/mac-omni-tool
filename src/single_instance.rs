@@ -1,15 +1,28 @@
+fn instance_lock_path() -> std::path::PathBuf {
+    if let Ok(home) = std::env::var("HOME") {
+        let dir = std::path::PathBuf::from(home).join("Library/Application Support/MacOmniTool");
+        if std::fs::create_dir_all(&dir).is_ok() {
+            return dir.join("instance.lock");
+        }
+    }
+    std::path::PathBuf::from("/tmp/com.khacthang.mac-omni-tool.instance.lock")
+}
+
 /// Ensure only a single instance of MacOmniTool can ever run at the same time.
 /// Prevents duplicate instances when macOS Session Restore and LaunchAgent both fire on reboot.
 pub fn ensure_single_instance(start_minimized: bool) {
     use std::io::{Read, Seek, SeekFrom, Write};
+    use std::os::unix::fs::OpenOptionsExt;
     use std::os::unix::io::AsRawFd;
 
-    let lock_path = "/tmp/com.khacthang.mac-omni-tool.instance.lock";
+    let lock_path = instance_lock_path();
     let Ok(mut file) = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
-        .open(lock_path)
+        .truncate(false)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&lock_path)
     else {
         return;
     };
@@ -118,13 +131,13 @@ fn start_self_uninstall_watchdog() {
 
             if moved_to_trash {
                 let _ = core_cleaner::set_autostart_config(false, false);
-                let _ = std::fs::remove_file("/tmp/com.khacthang.mac-omni-tool.instance.lock");
+                let _ = std::fs::remove_file(instance_lock_path());
                 std::process::exit(0);
             } else if missing_on_disk {
                 missing_streak = missing_streak.saturating_add(1);
                 if missing_streak >= 2 {
                     let _ = core_cleaner::set_autostart_config(false, false);
-                    let _ = std::fs::remove_file("/tmp/com.khacthang.mac-omni-tool.instance.lock");
+                    let _ = std::fs::remove_file(instance_lock_path());
                     std::process::exit(0);
                 }
             } else {

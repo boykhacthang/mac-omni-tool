@@ -11,7 +11,8 @@ pub mod tiling;
 pub use ffi::{CGPoint, CGRect, CGSize};
 pub use models::{OpenWindowItem, PermissionStatus, WindowShortcutBinding};
 pub use permissions::{
-    get_permissions_status, prompt_accessibility_if_needed,
+    get_permissions_status, is_accessibility_trusted, is_full_disk_access_granted,
+    is_screen_recording_granted, prompt_accessibility_if_needed,
     register_current_app_with_launch_services, request_or_open_permission,
     reset_and_request_permissions,
 };

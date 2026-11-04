@@ -237,19 +237,27 @@ pub fn find_app_leftovers(app_name: &str, bundle_id: &str) -> Vec<AppLeftoverFil
     let lib = PathBuf::from(home).join("Library");
     let mut found = Vec::new();
 
-    let search_dirs = [
+    let has_full_disk_access = fs::read_dir(lib.join("Safari")).is_ok()
+        || fs::read_dir(lib.join("Mail")).is_ok()
+        || fs::read_dir("/Library/Application Support/com.apple.TCC").is_ok();
+
+    let mut search_dirs = vec![
         ("LaunchAgents", lib.join("LaunchAgents")),
         ("Application Support", lib.join("Application Support")),
         ("Caches", lib.join("Caches")),
         ("Preferences", lib.join("Preferences")),
-        ("Containers", lib.join("Containers")),
-        ("Group Containers", lib.join("Group Containers")),
         ("Saved State", lib.join("Saved Application State")),
         ("HTTPStorages", lib.join("HTTPStorages")),
         ("WebKit", lib.join("WebKit")),
         ("Application Scripts", lib.join("Application Scripts")),
         ("Logs", lib.join("Logs")),
     ];
+    // Only scan ~/Library/Containers & Group Containers when Full Disk Access is granted
+    // so macOS never pops up "Mac Omni Tool would like to access data from other apps" automatically.
+    if has_full_disk_access {
+        search_dirs.push(("Containers", lib.join("Containers")));
+        search_dirs.push(("Group Containers", lib.join("Group Containers")));
+    }
 
     let name_clean: String = app_name
         .to_lowercase()

@@ -205,15 +205,74 @@ pub fn scan_system_junk() -> JunkScanSummary {
     }
 }
 
+fn is_protected_system_or_root_path(path: &Path, home: &str) -> bool {
+    let raw = path.to_string_lossy();
+    let trimmed = raw.trim_end_matches('/');
+    if trimmed.is_empty() || raw.contains("..") {
+        return true;
+    }
+    const SYSTEM_ROOTS: &[&str] = &[
+        "/",
+        "/System",
+        "/Library",
+        "/Applications",
+        "/Users",
+        "/bin",
+        "/sbin",
+        "/usr",
+        "/var",
+        "/private",
+        "/etc",
+        "/tmp",
+        "/dev",
+        "/Volumes",
+        "/cores",
+    ];
+    if SYSTEM_ROOTS.iter().any(|&r| trimmed.eq_ignore_ascii_case(r))
+        || trimmed.starts_with("/System/")
+        || trimmed.starts_with("/usr/")
+        || trimmed.starts_with("/bin/")
+        || trimmed.starts_with("/sbin/")
+    {
+        return true;
+    }
+    let home_trimmed = home.trim_end_matches('/');
+    if !home_trimmed.is_empty() {
+        let protected_home_dirs = [
+            home_trimmed.to_string(),
+            format!("{}/Library", home_trimmed),
+            format!("{}/Desktop", home_trimmed),
+            format!("{}/Documents", home_trimmed),
+            format!("{}/Downloads", home_trimmed),
+            format!("{}/Pictures", home_trimmed),
+            format!("{}/Movies", home_trimmed),
+            format!("{}/Music", home_trimmed),
+        ];
+        if protected_home_dirs
+            .iter()
+            .any(|d| trimmed.eq_ignore_ascii_case(d))
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// Safely move a file or folder into `~/.Trash` (or delete if already inside `~/.Trash`).
 pub fn move_path_to_trash(target_path: &str) -> Result<u64, String> {
     let path = PathBuf::from(target_path);
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    if is_protected_system_or_root_path(&path, &home) {
+        return Err(format!(
+            "Từ chối xóa đường dẫn hệ thống được bảo vệ: {}",
+            target_path
+        ));
+    }
     if !path.exists() {
         return Err(format!("Đường dẫn không tồn tại: {}", target_path));
     }
 
     let size = compute_dir_size(&path, 6);
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     let trash_dir = PathBuf::from(&home).join(".Trash");
     let _ = fs::create_dir_all(&trash_dir);
 

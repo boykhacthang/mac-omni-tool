@@ -9,7 +9,9 @@ async function renderWindowTilingScreen(view) {
     api("get_input_config")
   ]);
   const bindings = res.shortcuts || [];
-  const snappingEnabled = cfg.window_snapping_enabled !== false;
+  const perms = (res && res.permissions) ? res.permissions : await api("get_permissions_status");
+  const axGranted = !!(perms && perms.accessibility_granted);
+  const snappingEnabled = axGranted && cfg.window_snapping_enabled !== false;
 
   const categories = ["all", ...Array.from(new Set(bindings.map(b => b.category)))];
   if (!categories.includes(windowTilingCatFilter)) {
@@ -37,6 +39,22 @@ async function renderWindowTilingScreen(view) {
         <button class="btn btn-sm" id="btn-reset-shortcuts">${t("tiling.btn_reset_defaults")}</button>
       </div>
     </div>
+
+    ${!axGranted ? `
+      <div class="card" style="margin-bottom:10px;padding:11px 14px;border:1px solid rgba(245,158,11,0.55);background:rgba(245,158,11,0.08);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <div style="display:flex;flex-direction:column;gap:3px;">
+          <div style="font-weight:700;font-size:13px;color:#f59e0b;">
+            ${t("perm.tiling_banner_title")}
+          </div>
+          <div class="stat-sub" style="font-size:11.5px;">
+            ${t("perm.tiling_banner_sub")}
+          </div>
+        </div>
+        <button class="btn btn-sm btn-primary" id="btn-tiling-goto-perms">
+          ${t("perm.btn_open_app_perms")}
+        </button>
+      </div>
+    ` : ""}
 
     <div class="subtab-bar">
       <div class="pill-tabs" id="tiling-cat-tabs">
@@ -99,7 +117,23 @@ async function renderWindowTilingScreen(view) {
     });
   });
 
+  const gotoPermsBtn = document.getElementById("btn-tiling-goto-perms");
+  if (gotoPermsBtn) {
+    gotoPermsBtn.onclick = () => {
+      if (typeof window.openPermissionsSettings === "function") {
+        window.openPermissionsSettings("accessibility");
+      }
+    };
+  }
+
   document.getElementById("chk-snapping-master").onchange = async (e) => {
+    if (!axGranted) {
+      e.target.checked = false;
+      if (typeof window.openPermissionsSettings === "function") {
+        window.openPermissionsSettings("accessibility");
+      }
+      return;
+    }
     await api("update_input_config", { ...cfg, window_snapping_enabled: e.target.checked });
     showToast(e.target.checked
       ? t("tiling.toast_enabled")
@@ -166,7 +200,17 @@ async function renderWindowTilingScreen(view) {
 
   view.querySelectorAll(".btn-test-snap").forEach(btn => {
     btn.addEventListener("click", async () => {
+      if (!axGranted) {
+        if (typeof window.openPermissionsSettings === "function") {
+          window.openPermissionsSettings("accessibility");
+        }
+        return;
+      }
       const resp = await api("snap_window", { layout: btn.dataset.action });
+      if (resp && resp.missing_permission && typeof window.openPermissionsSettings === "function") {
+        window.openPermissionsSettings(resp.missing_permission);
+        return;
+      }
       showToast(resp.ok
         ? t("tiling.toast_snapped_action", { action: tWindowActionLabel(btn.dataset.action) })
         : (resp.error || t("tiling.toast_snap_failed"))

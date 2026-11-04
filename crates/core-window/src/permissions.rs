@@ -7,19 +7,35 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-/// Check Accessibility, Screen Recording, and Full Disk Access permissions.
-pub fn get_permissions_status() -> PermissionStatus {
-    let accessibility_granted = unsafe { AXIsProcessTrusted() };
-    let screen_recording_granted = unsafe { CGPreflightScreenCaptureAccess() };
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/Users".to_string());
-    let full_disk_access_granted =
-        fs::read_dir(PathBuf::from(&home).join("Library/Safari")).is_ok()
-            || fs::read_dir(PathBuf::from(&home).join("Library/Containers")).is_ok();
+/// Silent check whether macOS Accessibility (`AXIsProcessTrusted`) is currently granted.
+/// Never triggers any macOS TCC prompt.
+pub fn is_accessibility_trusted() -> bool {
+    unsafe { AXIsProcessTrusted() }
+}
 
+/// Silent check whether macOS Screen Recording (`CGPreflightScreenCaptureAccess`) is currently granted.
+/// Never triggers any macOS TCC prompt.
+pub fn is_screen_recording_granted() -> bool {
+    unsafe { CGPreflightScreenCaptureAccess() }
+}
+
+/// Silent check whether macOS Full Disk Access is currently granted.
+/// Checks protected directories (`~/Library/Safari`, `~/Library/Mail`, `/Library/Application Support/com.apple.TCC`)
+/// that return `EPERM` silently without triggering any macOS TCC popup (unlike `~/Library/Containers`).
+pub fn is_full_disk_access_granted() -> bool {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/Users".to_string());
+    let home_path = PathBuf::from(&home);
+    fs::read_dir(home_path.join("Library/Safari")).is_ok()
+        || fs::read_dir(home_path.join("Library/Mail")).is_ok()
+        || fs::read_dir("/Library/Application Support/com.apple.TCC").is_ok()
+}
+
+/// Check Accessibility, Screen Recording, and Full Disk Access permissions silently without triggering any prompts.
+pub fn get_permissions_status() -> PermissionStatus {
     PermissionStatus {
-        accessibility_granted,
-        screen_recording_granted,
-        full_disk_access_granted,
+        accessibility_granted: is_accessibility_trusted(),
+        screen_recording_granted: is_screen_recording_granted(),
+        full_disk_access_granted: is_full_disk_access_granted(),
     }
 }
 
@@ -78,8 +94,7 @@ pub fn register_current_app_with_launch_services() {
     }
 }
 
-/// Trigger a 1x1 pixel screen capture probe so `tccd` / `WindowServer` guarantees that
-/// `Mac Omni Tool` is listed inside `System Settings -> Privacy & Security -> Screen Recording`.
+/// Request Screen Recording registration with `tccd` / `WindowServer` when explicitly requested by user in App Settings.
 fn ensure_screen_recording_entry_registered() {
     unsafe {
         if CGPreflightScreenCaptureAccess() {
@@ -87,52 +102,53 @@ fn ensure_screen_recording_entry_registered() {
         }
         let _ = CGRequestScreenCaptureAccess();
     }
-    let probe_path = std::env::temp_dir().join(format!(
-        "mac_omni_tcc_probe_{}.png",
-        std::process::id()
-    ));
-    let _ = Command::new("screencapture")
-        .args(["-x", "-R", "0,0,1,1"])
-        .arg(&probe_path)
-        .status();
-    let _ = fs::remove_file(&probe_path);
 }
 
 /// Reset stale TCC entries (only when explicitly requested by user) and re-register fresh permission prompts.
 pub fn reset_and_request_permissions() {
     register_current_app_with_launch_services();
-    unsafe {
-        if !AXIsProcessTrusted() {
-            let _ = Command::new("tccutil")
-                .args(["reset", "Accessibility", "com.khacthang.mac-omni-tool"])
-                .status();
-            let _ = prompt_accessibility_if_needed();
-        }
-        if !CGPreflightScreenCaptureAccess() {
-            let _ = Command::new("tccutil")
-                .args(["reset", "ScreenCapture", "com.khacthang.mac-omni-tool"])
-                .status();
-            ensure_screen_recording_entry_registered();
-        }
+    if !is_accessibility_trusted() {
+        let _ = Command::new("tccutil")
+            .args(["reset", "Accessibility", "com.khacthang.mac-omni-tool"])
+            .status();
+        let _ = prompt_accessibility_if_needed();
+    }
+    if !is_screen_recording_granted() {
+        let _ = Command::new("tccutil")
+            .args(["reset", "ScreenCapture", "com.khacthang.mac-omni-tool"])
+            .status();
+        ensure_screen_recording_entry_registered();
     }
     let _ = Command::new("open")
         .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
         .spawn();
 }
 
-/// Open the corresponding macOS System Settings privacy pane without wiping existing TCC entries,
-/// while ensuring LaunchServices & `tccd` have registered "Mac Omni Tool" in the list.
+/// Open the corresponding macOS System Settings privacy pane when explicitly requested by the user in App Settings.
+/// If the permission is not currently granted (e.g. first time or stale `CDHash` after an app rebuild/update where the toggle
+/// in System Settings still appears ON), automatically resets the stale TCC entry for `com.khacthang.mac-omni-tool` first
+/// so the user can toggle it ON cleanly without getting stuck.
 pub fn request_or_open_permission(kind: &str) {
     register_current_app_with_launch_services();
     match kind {
         "accessibility" => {
-            let _ = prompt_accessibility_if_needed();
+            if !is_accessibility_trusted() {
+                let _ = Command::new("tccutil")
+                    .args(["reset", "Accessibility", "com.khacthang.mac-omni-tool"])
+                    .status();
+                let _ = prompt_accessibility_if_needed();
+            }
             let _ = Command::new("open")
                 .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
                 .spawn();
         }
         "screen_recording" => {
-            ensure_screen_recording_entry_registered();
+            if !is_screen_recording_granted() {
+                let _ = Command::new("tccutil")
+                    .args(["reset", "ScreenCapture", "com.khacthang.mac-omni-tool"])
+                    .status();
+                ensure_screen_recording_entry_registered();
+            }
             let _ = Command::new("open")
                 .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
                 .spawn();

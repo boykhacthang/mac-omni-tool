@@ -260,7 +260,7 @@ pub fn activate_clipboard_item(id: i64, simulate_paste: bool) -> Result<(), Stri
         objc_autoreleasePoolPop(pool);
     }
 
-    if simulate_paste {
+    if simulate_paste && unsafe { AXIsProcessTrusted() } {
         std::thread::spawn(|| {
             std::thread::sleep(Duration::from_millis(80));
             unsafe {

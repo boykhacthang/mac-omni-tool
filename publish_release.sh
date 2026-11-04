@@ -17,9 +17,12 @@ PUB_DATE="$(date '+%Y-%m-%d')"
 
 echo "🚀 Bắt đầu đóng gói và phát hành Mac Omni Tool v${VERSION}..."
 
-# 1. Cập nhật version trong Cargo.toml và bundle_app.sh
+# 1. Cập nhật version trong Cargo.toml, bundle_app.sh và UI
 sed -i '' -E "s/^version = \"[0-9]+\.[0-9]+\.[0-9]+\"/version = \"${VERSION}\"/" Cargo.toml
 sed -i '' -E "s/<string>[0-9]+\.[0-9]+\.[0-9]+<\/string>/<string>${VERSION}<\/string>/g" bundle_app.sh
+sed -i '' -E "s/\|\| \"[0-9]+\.[0-9]+\.[0-9]+\"/|| \"${VERSION}\"/g" ui/js/app.js
+sed -i '' -E "s/v[0-9]+\.[0-9]+\.[0-9]+ • MIT License/v${VERSION} • MIT License/g" ui/js/screens/settings.js
+sed -i '' -E "s/version: \"[0-9]+\.[0-9]+\.[0-9]+\"/version: \"${VERSION}\"/g" ui/js/screens/settings.js
 
 # 2. Chạy bộ kiểm thử và đóng gói MacOmniTool.app + .dmg + .zip
 cargo test --workspace

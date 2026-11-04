@@ -51,7 +51,7 @@ async function runUpdateCheckInModal(forceManual = false) {
   if (!box) return;
 
   const cfg = await api("get_input_config");
-  const curVerFallback = (cachedUpdateState && cachedUpdateState.current_version) || "2.1.0";
+  const curVerFallback = (cachedUpdateState && cachedUpdateState.current_version) || "2.1.1";
   const chk = document.getElementById("chk-modal-auto-update");
   if (chk && cfg) {
     chk.checked = cfg.auto_check_updates !== false;
@@ -207,7 +207,7 @@ function showAboutModalDialog() {
     existing.remove();
   }
 
-  const curVer = (cachedUpdateState && cachedUpdateState.current_version) || "2.1.0";
+  const curVer = (cachedUpdateState && cachedUpdateState.current_version) || "2.1.1";
   const backdrop = document.createElement("div");
   backdrop.id = "about-modal-backdrop";
   backdrop.className = "about-modal-backdrop";
@@ -445,6 +445,27 @@ async function initMainDashboard() {
     renderActiveTab();
   };
   window.switchMainTab = window.__openDashboardTab;
+
+  window.openPermissionsSettings = (missingKind) => {
+    window.__settingsInitialSubTab = "system";
+    window.__highlightedPermKind = missingKind || "";
+    activeTab = "settings";
+    renderShell();
+    renderActiveTab();
+    if (missingKind === "accessibility") {
+      showToast(t("perm.toast_need_accessibility"));
+    } else if (missingKind === "screen_recording") {
+      showToast(t("perm.toast_need_screen_recording"));
+    } else {
+      showToast(t("perm.toast_need_generic"));
+    }
+  };
+
+  window.__onMainWindowFocused = () => {
+    if (activeTab === "settings" || activeTab === "mouse" || activeTab === "tiling") {
+      renderActiveTab();
+    }
+  };
 
   window.__onThemeChanged = () => {
     renderShell();

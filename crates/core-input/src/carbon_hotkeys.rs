@@ -75,24 +75,26 @@ pub fn sync_feature_carbon_hotkeys() {
             &cfg.mission_control_shortcut,
         );
 
-        // Hotkey 4: Screenshot Mode 1 (Region)
+        let screen_rec_ok = core_window::is_screen_recording_granted();
+
+        // Hotkey 4: Screenshot Mode 1 (Region) — only active when Screen Recording permission is granted
         register_if_active(
             4,
-            cfg.screenshot_enabled && cfg.screenshot_region_enabled,
+            screen_rec_ok && cfg.screenshot_enabled && cfg.screenshot_region_enabled,
             &cfg.screenshot_shortcut,
         );
 
-        // Hotkey 5: Screenshot Mode 2 (Fullscreen + Annotation)
+        // Hotkey 5: Screenshot Mode 2 (Fullscreen + Annotation) — only active when Screen Recording permission is granted
         register_if_active(
             5,
-            cfg.screenshot_enabled && cfg.screenshot_fullscreen_edit_enabled,
+            screen_rec_ok && cfg.screenshot_enabled && cfg.screenshot_fullscreen_edit_enabled,
             &cfg.screenshot_fullscreen_edit_shortcut,
         );
 
-        // Hotkey 6: Screenshot Mode 3 (Fullscreen + Instant Copy)
+        // Hotkey 6: Screenshot Mode 3 (Fullscreen + Instant Copy) — only active when Screen Recording permission is granted
         register_if_active(
             6,
-            cfg.screenshot_enabled && cfg.screenshot_fullscreen_copy_enabled,
+            screen_rec_ok && cfg.screenshot_enabled && cfg.screenshot_fullscreen_copy_enabled,
             &cfg.screenshot_fullscreen_copy_shortcut,
         );
 
@@ -152,7 +154,7 @@ pub fn sync_window_tiling_carbon_hotkeys() {
             }
         }
 
-        if !get_input_config().window_snapping_enabled {
+        if !get_input_config().window_snapping_enabled || !core_window::is_accessibility_trusted() {
             return;
         }
 
@@ -255,7 +257,8 @@ unsafe extern "C" fn carbon_hotkey_handler(
                 }
             }
             4 => {
-                if cfg.screenshot_enabled
+                if core_window::is_screen_recording_granted()
+                    && cfg.screenshot_enabled
                     && cfg.screenshot_region_enabled
                     && !cfg.screenshot_shortcut.trim().is_empty()
                 {
@@ -263,7 +266,8 @@ unsafe extern "C" fn carbon_hotkey_handler(
                 }
             }
             5 => {
-                if cfg.screenshot_enabled
+                if core_window::is_screen_recording_granted()
+                    && cfg.screenshot_enabled
                     && cfg.screenshot_fullscreen_edit_enabled
                     && !cfg.screenshot_fullscreen_edit_shortcut.trim().is_empty()
                 {
@@ -271,7 +275,8 @@ unsafe extern "C" fn carbon_hotkey_handler(
                 }
             }
             6 => {
-                if cfg.screenshot_enabled
+                if core_window::is_screen_recording_granted()
+                    && cfg.screenshot_enabled
                     && cfg.screenshot_fullscreen_copy_enabled
                     && !cfg.screenshot_fullscreen_copy_shortcut.trim().is_empty()
                 {
@@ -293,7 +298,7 @@ unsafe extern "C" fn carbon_hotkey_handler(
                 notify_overlay_immediate(UiOverlayEvent::HideAllOverlays);
             }
             id if (100..150).contains(&id) => {
-                if cfg.window_snapping_enabled {
+                if cfg.window_snapping_enabled && core_window::is_accessibility_trusted() {
                     let idx = (id - 100) as usize;
                     let bindings = core_window::get_window_shortcuts();
                     if let Some(b) = bindings.get(idx) {

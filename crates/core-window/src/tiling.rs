@@ -2,7 +2,6 @@
 
 use crate::ffi::*;
 use std::ffi::c_void;
-use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
 static OWN_WINDOW_SNAP_CB: OnceLock<Mutex<Option<Box<dyn Fn(&str) + Send + Sync>>>> =
@@ -183,30 +182,6 @@ pub fn frontmost_application_pid() -> i32 {
     }
 }
 
-/// Fallback via AppleScript (`System Events`) when `AXIsProcessTrusted` is blocked after a binary rebuild.
-fn snap_window_via_osascript_fallback(layout: &str) -> Result<String, String> {
-    let (nx, ny, nw, nh) = compute_snap_rect(layout, 100.0, 100.0);
-    let script = format!(
-        r#"tell application "System Events"
-            set frontProc to first application process whose frontmost is true
-            tell front window of frontProc
-                set position to {{{}, {}}}
-                set size to {{{}, {}}}
-            end tell
-        end tell"#,
-        nx as i32, ny as i32, nw as i32, nh as i32
-    );
-    if let Ok(out) = Command::new("osascript").args(["-e", &script]).output() {
-        if out.status.success() {
-            return Ok(format!(
-                "Đã áp dụng bố cục '{}' ({}x{} tại {},{})",
-                layout, nw as i32, nh as i32, nx as i32, ny as i32
-            ));
-        }
-    }
-    Err("Chưa cấp quyền Accessibility (Trợ năng) cho phiên bản mới. Vui lòng bấm 'Làm mới quyền' trong tab Cài đặt.".to_string())
-}
-
 /// Snap or tile the currently focused window to the specified layout.
 pub fn snap_focused_window(layout: &str) -> Result<String, String> {
     let front_pid = frontmost_application_pid();
@@ -230,7 +205,7 @@ pub fn snap_focused_window(layout: &str) -> Result<String, String> {
 
     unsafe {
         if !AXIsProcessTrusted() {
-            return snap_window_via_osascript_fallback(layout);
+            return Err("Chưa cấp quyền Accessibility (Trợ năng). Vui lòng vào Cài đặt → Hệ thống & Quyền trên App để cấp quyền.".to_string());
         }
 
         // 2. Obtain AXUIElement for the frontmost application directly by PID (reliable even while Ctrl+Option is held)
@@ -287,7 +262,7 @@ pub fn snap_focused_window(layout: &str) -> Result<String, String> {
         CFRelease(focused_app);
 
         if focused_win.is_null() {
-            return snap_window_via_osascript_fallback(layout);
+            return Err("Không tìm thấy cửa sổ đang mở để căn chỉnh.".to_string());
         }
 
         // Read current window position + center point to determine which display it sits on

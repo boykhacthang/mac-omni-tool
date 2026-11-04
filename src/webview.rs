@@ -19,7 +19,7 @@ pub fn build_webview_with_api(
                 let bytes = serde_json::to_vec(&resp_json).unwrap_or_default();
                 Response::builder()
                     .header("Content-Type", "application/json")
-                    .header("Access-Control-Allow-Origin", "*")
+                    .header("Access-Control-Allow-Origin", "omni://localhost")
                     .body(Cow::Owned(bytes))
                     .unwrap()
             } else if path == "/screenshot.png"
@@ -43,13 +43,13 @@ pub fn build_webview_with_api(
                 Response::builder()
                     .header("Content-Type", "image/png")
                     .header("Cache-Control", "no-store, no-cache, must-revalidate")
-                    .header("Access-Control-Allow-Origin", "*")
+                    .header("Access-Control-Allow-Origin", "omni://localhost")
                     .body(Cow::Owned(bytes))
                     .unwrap()
             } else if let Some((content_type, asset_bytes)) = resolve_ui_asset(path) {
                 Response::builder()
                     .header("Content-Type", content_type)
-                    .header("Access-Control-Allow-Origin", "*")
+                    .header("Access-Control-Allow-Origin", "omni://localhost")
                     .body(Cow::Borrowed(asset_bytes))
                     .unwrap()
             } else {

@@ -1,9 +1,9 @@
 {
-  "version": "2.1.0",
+  "version": "2.1.1",
   "published_at": "2026-11-04",
-  "zip_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.1.0/MacOmniTool-v2.1.0-macOS.zip",
-  "dmg_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.1.0/MacOmniTool-v2.1.0-Installer.dmg",
-  "sha256_zip": "d0b3928518c4ff0f216d4885dffb1941587aef036711347a3970fe1cd73f1aa6",
-  "notes_en": "Added Menu Bar customization, background mode, Keep Current Version / Disable Auto-Update Check mode, and eliminated overlay screen freeze with global Esc emergency hotkey",
-  "notes_vi": "Th\u00eam tu\u1ef3 ch\u1ec9nh Menu Bar, ch\u1ebf \u0111\u1ed9 ch\u1ea1y ng\u1ea7m, kho\u00e1 gi\u1eef nguy\u00ean phi\u00ean b\u1ea3n hi\u1ec7n t\u1ea1i (t\u1eaft ki\u1ec3m tra c\u1eadp nh\u1eadt) v\u00e0 kh\u1eafc ph\u1ee5c tri\u1ec7t \u0111\u1ec3 l\u1ed7i \u0111\u01a1 m\u00e0n h\u00ecnh + ph\u00edm Esc kh\u1ea9n c\u1ea5p"
+  "zip_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.1.1/MacOmniTool-v2.1.1-macOS.zip",
+  "dmg_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.1.1/MacOmniTool-v2.1.1-Installer.dmg",
+  "sha256_zip": "334290e52805a932fe214fe82bcc2835d8431dbe447ba4014f2c8a199fd51b96",
+  "notes_en": "Fixed infinite macOS permission prompt loop on startup: removed background auto-prompts, gated permission-dependent features through App Permissions Settings, and added automatic stale TCC reset when granting permissions.",
+  "notes_vi": "S\u1eeda tri\u1ec7t \u0111\u1ec3 l\u1ed7i l\u1eb7p th\u00f4ng b\u00e1o xin quy\u1ec1n h\u1ec7 th\u1ed1ng (Accessibility / Screen Recording) khi kh\u1edfi \u0111\u1ed9ng: kh\u00f4ng t\u1ef1 xin quy\u1ec1n ng\u1ea7m, ch\u1ec9 \u0111i\u1ec1u h\u01b0\u1edbng v\u00e0o C\u00e0i \u0111\u1eb7t Quy\u1ec1n tr\u00ean App khi b\u1eadt t\u00ednh n\u0103ng li\u00ean quan v\u00e0 t\u1ef1 l\u00e0m m\u1edbi TCC khi b\u1ea5m C\u1ea5p quy\u1ec1n."
 }

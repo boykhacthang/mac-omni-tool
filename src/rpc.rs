@@ -168,7 +168,8 @@ pub fn handle_api_request(body: &[u8], proxy: &EventLoopProxy<AppUserEvent>) -> 
         // --------------------------------------------------------------------
         "get_window_shortcuts" => {
             let shortcuts = core_window::get_window_shortcuts();
-            json!({ "ok": true, "shortcuts": shortcuts })
+            let permissions = core_window::get_permissions_status();
+            json!({ "ok": true, "shortcuts": shortcuts, "permissions": permissions })
         }
         "update_window_shortcut" => {
             let action = p.get("action").and_then(|v| v.as_str()).unwrap_or("");
@@ -188,6 +189,13 @@ pub fn handle_api_request(body: &[u8], proxy: &EventLoopProxy<AppUserEvent>) -> 
             json!({ "ok": true, "shortcuts": list })
         }
         "snap_window" => {
+            if !core_window::is_accessibility_trusted() {
+                return json!({
+                    "ok": false,
+                    "missing_permission": "accessibility",
+                    "error": "Cần cấp quyền Accessibility (Trợ năng) trong Cài đặt → Hệ thống & Quyền trên App trước khi sử dụng Chia cửa sổ."
+                });
+            }
             let cfg = core_input::get_input_config();
             if !cfg.window_snapping_enabled {
                 return json!({ "ok": false, "error": "Tính năng Chia & Gắn cửa sổ đang tắt" });
@@ -310,11 +318,13 @@ pub fn handle_api_request(body: &[u8], proxy: &EventLoopProxy<AppUserEvent>) -> 
             let cfg = core_input::get_input_config();
             let spaces = core_input::get_spaces_status();
             let running_apps = core_input::list_running_gui_apps();
+            let permissions = core_window::get_permissions_status();
             json!({
                 "ok": true,
                 "config": cfg,
                 "spaces": spaces,
-                "running_apps": running_apps
+                "running_apps": running_apps,
+                "permissions": permissions
             })
         }
         "list_installed_mouse_apps" => {
@@ -350,12 +360,30 @@ pub fn handle_api_request(body: &[u8], proxy: &EventLoopProxy<AppUserEvent>) -> 
                 .get("enabled")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(!cfg.external_mouse_enabled);
+            if next && !core_window::is_accessibility_trusted() {
+                return json!({
+                    "ok": false,
+                    "missing_permission": "accessibility",
+                    "error": "Cần cấp quyền Accessibility (Trợ năng) trong Cài đặt → Hệ thống & Quyền trên App trước khi bật Chuột rời.",
+                    "enabled": cfg.external_mouse_enabled,
+                    "config": cfg
+                });
+            }
             cfg.external_mouse_enabled = next;
             let saved = core_input::update_input_config(cfg);
             json!({ "ok": true, "enabled": saved.external_mouse_enabled, "config": saved })
         }
         "toggle_invert_mouse_scroll" => {
             let mut cfg = core_input::get_input_config();
+            if !core_window::is_accessibility_trusted() {
+                return json!({
+                    "ok": false,
+                    "missing_permission": "accessibility",
+                    "error": "Cần cấp quyền Accessibility (Trợ năng) trong Cài đặt → Hệ thống & Quyền trên App.",
+                    "inverted": cfg.invert_external_mouse_scroll,
+                    "config": cfg
+                });
+            }
             if !cfg.external_mouse_enabled {
                 return json!({ "ok": false, "error": "Tối ưu Chuột rời đang tắt", "inverted": cfg.invert_external_mouse_scroll, "config": cfg });
             }
@@ -369,6 +397,15 @@ pub fn handle_api_request(body: &[u8], proxy: &EventLoopProxy<AppUserEvent>) -> 
         }
         "toggle_smooth_scroll" => {
             let mut cfg = core_input::get_input_config();
+            if !core_window::is_accessibility_trusted() {
+                return json!({
+                    "ok": false,
+                    "missing_permission": "accessibility",
+                    "error": "Cần cấp quyền Accessibility (Trợ năng) trong Cài đặt → Hệ thống & Quyền trên App.",
+                    "enabled": cfg.smooth_scroll_enabled,
+                    "config": cfg
+                });
+            }
             if !cfg.external_mouse_enabled {
                 return json!({ "ok": false, "error": "Tối ưu Chuột rời đang tắt", "enabled": cfg.smooth_scroll_enabled, "config": cfg });
             }
@@ -537,6 +574,7 @@ pub fn handle_api_request(body: &[u8], proxy: &EventLoopProxy<AppUserEvent>) -> 
             }
         }
         "get_permissions_status" => {
+            core_input::notify_permissions_changed();
             let perms = core_window::get_permissions_status();
             serde_json::to_value(perms).unwrap_or_else(|_| json!({}))
         }
@@ -546,10 +584,12 @@ pub fn handle_api_request(body: &[u8], proxy: &EventLoopProxy<AppUserEvent>) -> 
                 .and_then(|v| v.as_str())
                 .unwrap_or("accessibility");
             core_window::request_or_open_permission(kind);
+            core_input::notify_permissions_changed();
             json!({ "ok": true })
         }
         "reset_permissions" => {
             core_window::reset_and_request_permissions();
+            core_input::notify_permissions_changed();
             json!({ "ok": true })
         }
 
@@ -638,11 +678,25 @@ pub fn handle_api_request(body: &[u8], proxy: &EventLoopProxy<AppUserEvent>) -> 
                 .and_then(|v| v.as_str())
                 .unwrap_or("clipboard");
             if w == "alttab" {
+                if !core_window::is_accessibility_trusted() {
+                    return json!({
+                        "ok": false,
+                        "missing_permission": "accessibility",
+                        "error": "Cần cấp quyền Accessibility (Trợ năng) trong Cài đặt → Hệ thống & Quyền trên App trước khi sử dụng Alt-Tab."
+                    });
+                }
                 if !cfg.replace_macos_cmd_tab {
                     return json!({ "ok": false, "error": "Alt-Tab đang tắt" });
                 }
                 let _ = proxy.send_event(AppUserEvent::ToggleAltTabOverlay);
             } else if w == "screenshot" {
+                if !core_window::is_screen_recording_granted() {
+                    return json!({
+                        "ok": false,
+                        "missing_permission": "screen_recording",
+                        "error": "Cần cấp quyền Ghi màn hình (Screen Recording) trong Cài đặt → Hệ thống & Quyền trên App trước khi chụp màn hình."
+                    });
+                }
                 if !cfg.screenshot_enabled || !cfg.screenshot_region_enabled {
                     return json!({ "ok": false, "error": "Chụp vùng chọn đang tắt" });
                 }
@@ -674,6 +728,13 @@ pub fn handle_api_request(body: &[u8], proxy: &EventLoopProxy<AppUserEvent>) -> 
         // Region Screenshot (Dual-Monitor), Fullscreen & Annotation
         // --------------------------------------------------------------------
         "trigger_screenshot" => {
+            if !core_window::is_screen_recording_granted() {
+                return json!({
+                    "ok": false,
+                    "missing_permission": "screen_recording",
+                    "error": "Cần cấp quyền Ghi màn hình (Screen Recording) trong Cài đặt → Hệ thống & Quyền trên App trước khi chụp màn hình."
+                });
+            }
             let cfg = core_input::get_input_config();
             if !cfg.screenshot_enabled || !cfg.screenshot_region_enabled {
                 return json!({ "ok": false, "error": "Chụp vùng chọn đang tắt" });
@@ -682,6 +743,13 @@ pub fn handle_api_request(body: &[u8], proxy: &EventLoopProxy<AppUserEvent>) -> 
             json!({ "ok": true })
         }
         "trigger_fullscreen_screenshot" => {
+            if !core_window::is_screen_recording_granted() {
+                return json!({
+                    "ok": false,
+                    "missing_permission": "screen_recording",
+                    "error": "Cần cấp quyền Ghi màn hình (Screen Recording) trong Cài đặt → Hệ thống & Quyền trên App trước khi chụp màn hình."
+                });
+            }
             let cfg = core_input::get_input_config();
             let display_id = p.get("display_id").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
             let instant_copy = p

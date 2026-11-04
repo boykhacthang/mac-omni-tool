@@ -3,7 +3,7 @@
 > 🌐 **Language / Ngôn ngữ**: [🇬🇧 English](README.md) | **[🇻🇳 Tiếng Việt](README.vi.md)**
 
 [![Edition](https://img.shields.io/badge/Phiên_bản-Free_Community-10b981?style=flat-square)](#)
-[![Version](https://img.shields.io/badge/Version-2.1.0-3b82f6?style=flat-square)](#)
+[![Version](https://img.shields.io/badge/Version-2.1.1-3b82f6?style=flat-square)](#)
 [![License: MIT](https://img.shields.io/badge/Giấy_phép-MIT-f59e0b?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/macOS-Apple_Silicon_%26_Intel-000000?style=flat-square&logo=apple)](#)
 [![Built with Rust](https://img.shields.io/badge/Ngôn_ngữ-Rust-dea584?style=flat-square&logo=rust)](#)
@@ -20,10 +20,10 @@ Người dùng chỉ cần tải trực tiếp bộ cài **`.dmg`** hoặc **`.z
 
 | Phiên bản | Trạng thái | 💿 Bộ cài `.dmg` chuẩn macOS | 🗜️ Bản nén `.zip` gọn nhẹ | 📋 Trang Release |
 | :--- | :--- | :--- | :--- | :--- |
-| **v2.1.0** | 🌟 **Mới nhất (Khuyên dùng)** | [**⬇️ Tải `MacOmniTool-v2.1.0-Installer.dmg` (3.2 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.1.0/MacOmniTool-v2.1.0-Installer.dmg) | [**⬇️ Tải `MacOmniTool-v2.1.0-macOS.zip` (2.7 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.1.0/MacOmniTool-v2.1.0-macOS.zip) | [GitHub Release v2.1.0](https://github.com/boykhacthang/mac-omni-tool/releases/tag/v2.1.0) |
+| **v2.1.1** | 🌟 **Mới nhất (Khuyên dùng)** | [**⬇️ Tải `MacOmniTool-v2.1.1-Installer.dmg` (3.2 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.1.1/MacOmniTool-v2.1.1-Installer.dmg) | [**⬇️ Tải `MacOmniTool-v2.1.1-macOS.zip` (2.7 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.1.1/MacOmniTool-v2.1.1-macOS.zip) | [GitHub Release v2.1.1](https://github.com/boykhacthang/mac-omni-tool/releases/tag/v2.1.1) |
 
 ### ⚡ Hướng dẫn Cài đặt Nhanh (30 Giây)
-1. Tải file **`MacOmniTool-v2.1.0-Installer.dmg`** ở bảng trên và mở lên.
+1. Tải file **`MacOmniTool-v2.1.1-Installer.dmg`** ở bảng trên và mở lên.
 2. Kéo **`MacOmniTool.app`** thả vào thư mục **`Applications`**.
 3. **Mở khóa lần đầu trên máy Mac mới**: Vì đây là bản cộng đồng miễn phí không thu phí chứng chỉ Apple Developer (\$99/năm), ở lần mở đầu tiên bạn chỉ cần bấm đúp vào file **`Mo-Khoa-App-Tren-May-Moi.command`** có sẵn trong `.dmg` (hoặc chạy lệnh sau trong Terminal):
    ```bash

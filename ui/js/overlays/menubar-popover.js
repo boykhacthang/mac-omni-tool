@@ -7,6 +7,7 @@ async function initMiniLeftWidget() {
   let dispState = null;
   let audioState = null;
   let inputCfg = null;
+  let permsState = null;
   let lastAudioSig = "";
   let isDraggingSlider = false;
 
@@ -21,16 +22,18 @@ async function initMiniLeftWidget() {
   async function pollMiniStats() {
     applyAppTheme(getAppTheme(), false);
     applyAppLang(getAppLang(), false);
-    const [hw, disp, aud, inp] = await Promise.all([
+    const [hw, disp, aud, inp, perms] = await Promise.all([
       api("get_menubar_stats"),
       api("get_display_state"),
       api("get_audio_state"),
-      api("get_input_config")
+      api("get_input_config"),
+      api("get_permissions_status")
     ]);
     hwData = hw;
     dispState = disp;
     audioState = aud;
     inputCfg = inp;
+    permsState = perms;
     lastAudioSig = computeAudioSignature(aud);
 
     const cpuPct = hwData ? formatPct(hwData.cpu_usage_percent) : "0.0%";
@@ -94,7 +97,8 @@ async function initMiniLeftWidget() {
     const muted = audioState ? !!audioState.muted : false;
     const outDevs = (audioState && audioState.output_devices) ? audioState.output_devices : [];
     const curLang = getAppLang();
-    const mouseEnabled = !inputCfg || inputCfg.external_mouse_enabled !== false;
+    const axGranted = !permsState || !!permsState.accessibility_granted;
+    const mouseEnabled = axGranted && (!inputCfg || inputCfg.external_mouse_enabled !== false);
     const shotRegionEnabled = !inputCfg || (inputCfg.screenshot_enabled !== false && inputCfg.screenshot_region_enabled !== false);
     const clipEnabled = !inputCfg || inputCfg.clipboard_enabled !== false;
 
@@ -250,16 +254,31 @@ async function initMiniLeftWidget() {
     };
     document.getElementById("mini-btn-mouse-master").onclick = async () => {
       const res = await api("toggle_external_mouse");
+      if (res && res.missing_permission) {
+        await closePopover();
+        await api("show_launcher");
+        return;
+      }
       if (res && res.config) inputCfg = res.config;
       renderMini();
     };
     document.getElementById("mini-btn-mouse-invert").onclick = async () => {
       const res = await api("toggle_invert_mouse_scroll");
+      if (res && res.missing_permission) {
+        await closePopover();
+        await api("show_launcher");
+        return;
+      }
       if (res && res.config) inputCfg = res.config;
       renderMini();
     };
     document.getElementById("mini-btn-mouse-smooth").onclick = async () => {
       const res = await api("toggle_smooth_scroll");
+      if (res && res.missing_permission) {
+        await closePopover();
+        await api("show_launcher");
+        return;
+      }
       if (res && res.config) inputCfg = res.config;
       renderMini();
     };

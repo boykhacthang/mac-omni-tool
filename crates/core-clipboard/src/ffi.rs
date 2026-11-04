@@ -64,6 +64,11 @@ extern "C" {
     pub fn CGEventPost(tap: u32, event: *mut c_void);
 }
 
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    pub fn AXIsProcessTrusted() -> bool;
+}
+
 #[link(name = "CoreFoundation", kind = "framework")]
 extern "C" {
     pub fn CFRelease(cf: *const c_void);

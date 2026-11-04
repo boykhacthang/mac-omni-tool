@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 static TAP_RUNNING: AtomicBool = AtomicBool::new(false);
+static TAP_ATTEMPTED_WHILE_TRUSTED: AtomicBool = AtomicBool::new(false);
 static STATE_CACHE_RUNNING: AtomicBool = AtomicBool::new(false);
 static ALTTAB_MODIFIER_HELD: AtomicBool = AtomicBool::new(false);
 
@@ -106,18 +107,29 @@ fn start_background_state_cache() {
         });
 }
 
-/// Dynamically enable or disable the macOS `CGEventTap` port based on whether any tap-dependent feature is active.
+/// Dynamically enable or disable the macOS `CGEventTap` port based on whether Accessibility is trusted
+/// and whether any tap-dependent feature is active.
 pub fn sync_event_tap_enabled(enabled: bool) {
-    if !enabled {
+    let trusted = core_window::is_accessibility_trusted();
+    if !enabled || !trusted {
         reset_all_tap_held_states();
     }
     let port = ACTIVE_TAP_PORT.load(Ordering::Relaxed) as CFMachPortRef;
     if !port.is_null() {
-        let active = enabled || OVERLAY_ESCAPE_ACTIVE.load(Ordering::SeqCst);
+        let active = trusted && (enabled || OVERLAY_ESCAPE_ACTIVE.load(Ordering::SeqCst));
         unsafe {
             CGEventTapEnable(port, active);
         }
     }
+}
+
+/// Notify `core-input` that macOS permissions may have changed (e.g. user returned from System Settings or clicked "Làm mới quyền").
+/// Re-evaluates `CGEventTap` state and Carbon HotKeys without ever triggering any OS prompt.
+pub fn notify_permissions_changed() {
+    TAP_ATTEMPTED_WHILE_TRUSTED.store(false, Ordering::SeqCst);
+    let cfg = crate::config::get_input_config();
+    sync_event_tap_enabled(cfg.needs_event_tap());
+    crate::carbon_hotkeys::sync_window_tiling_carbon_hotkeys();
 }
 
 unsafe extern "C" fn event_tap_callback(
@@ -126,21 +138,23 @@ unsafe extern "C" fn event_tap_callback(
     event: CGEventRef,
     _user_info: *mut c_void,
 ) -> CGEventRef {
+    let trusted = core_window::is_accessibility_trusted();
     if event_type == K_CG_EVENT_TAP_DISABLED_BY_TIMEOUT {
         reset_all_tap_held_states();
         let port = ACTIVE_TAP_PORT.load(Ordering::Relaxed) as CFMachPortRef;
         if !port.is_null() {
-            let should_enable = config_mutex()
-                .try_lock()
-                .map(|g| g.needs_event_tap())
-                .unwrap_or(true)
-                || OVERLAY_ESCAPE_ACTIVE.load(Ordering::SeqCst);
+            let should_enable = trusted
+                && (config_mutex()
+                    .try_lock()
+                    .map(|g| g.needs_event_tap())
+                    .unwrap_or(true)
+                    || OVERLAY_ESCAPE_ACTIVE.load(Ordering::SeqCst));
             CGEventTapEnable(port, should_enable);
         }
         return event;
     }
 
-    if event.is_null() {
+    if event.is_null() || !trusted {
         return event;
     }
 
@@ -342,7 +356,7 @@ unsafe extern "C" fn event_tap_callback(
             }
 
             if let Some(combo) = keycode_and_flags_to_shortcut(keycode, flags) {
-                if cfg.screenshot_enabled {
+                if cfg.screenshot_enabled && core_window::is_screen_recording_granted() {
                     if cfg.screenshot_region_enabled
                         && shortcuts_match(&combo, &cfg.screenshot_shortcut)
                     {
@@ -429,14 +443,12 @@ unsafe extern "C" fn event_tap_callback(
 }
 
 /// Start the global `CGEventTap` listener thread for `Cmd+Tab` replacement, Finder Cut/Paste, Mouse Chords, and Global Shortcuts.
+/// Never prompts for Accessibility permission automatically on startup or in background retry loops:
+/// `CGEventTapCreate` is only invoked after `core_window::is_accessibility_trusted()` is `true`, and at most once per trust session.
 pub fn start_global_input_tap() {
     start_background_state_cache();
     if TAP_RUNNING.swap(true, Ordering::SeqCst) {
         return;
-    }
-
-    if crate::config::get_input_config().needs_accessibility() {
-        let _ = core_window::prompt_accessibility_if_needed();
     }
 
     std::thread::Builder::new()
@@ -452,48 +464,44 @@ pub fn start_global_input_tap() {
                 | (1 << K_CG_EVENT_OTHER_MOUSE_DOWN)
                 | (1 << K_CG_EVENT_OTHER_MOUSE_UP);
 
-            let tap = CGEventTapCreate(
-                K_CG_HID_EVENT_TAP,
-                K_CG_HEAD_INSERT_EVENT_TAP,
-                K_CG_EVENT_TAP_OPTION_DEFAULT,
-                mask,
-                event_tap_callback,
-                std::ptr::null_mut(),
-            );
-
-            if tap.is_null() {
-                loop {
-                    std::thread::sleep(std::time::Duration::from_secs(3));
-                    if !crate::config::get_input_config().needs_event_tap() {
-                        continue;
-                    }
-                    let retry_tap = CGEventTapCreate(
-                        K_CG_HID_EVENT_TAP,
-                        K_CG_HEAD_INSERT_EVENT_TAP,
-                        K_CG_EVENT_TAP_OPTION_DEFAULT,
-                        mask,
-                        event_tap_callback,
-                        std::ptr::null_mut(),
-                    );
-                    if !retry_tap.is_null() {
-                        ACTIVE_TAP_PORT.store(retry_tap as i64, Ordering::Relaxed);
-                        let src = CFMachPortCreateRunLoopSource(std::ptr::null(), retry_tap, 0);
-                        let rl = CFRunLoopGetCurrent();
-                        CFRunLoopAddSource(rl, src, kCFRunLoopCommonModes);
-                        let should_enable = crate::config::get_input_config().needs_event_tap();
-                        CGEventTapEnable(retry_tap, should_enable);
-                        CFRunLoopRun();
-                        break;
-                    }
+            loop {
+                let trusted = core_window::is_accessibility_trusted();
+                if !trusted {
+                    TAP_ATTEMPTED_WHILE_TRUSTED.store(false, Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    continue;
                 }
-            } else {
-                ACTIVE_TAP_PORT.store(tap as i64, Ordering::Relaxed);
-                let src = CFMachPortCreateRunLoopSource(std::ptr::null(), tap, 0);
-                let rl = CFRunLoopGetCurrent();
-                CFRunLoopAddSource(rl, src, kCFRunLoopCommonModes);
-                let should_enable = crate::config::get_input_config().needs_event_tap();
-                CGEventTapEnable(tap, should_enable);
-                CFRunLoopRun();
+                if !crate::config::get_input_config().needs_event_tap() {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    continue;
+                }
+                // Only attempt CGEventTapCreate once per trust session so we NEVER trigger an endless OS permission dialog loop.
+                if TAP_ATTEMPTED_WHILE_TRUSTED.swap(true, Ordering::SeqCst) {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    continue;
+                }
+
+                let tap = CGEventTapCreate(
+                    K_CG_HID_EVENT_TAP,
+                    K_CG_HEAD_INSERT_EVENT_TAP,
+                    K_CG_EVENT_TAP_OPTION_DEFAULT,
+                    mask,
+                    event_tap_callback,
+                    std::ptr::null_mut(),
+                );
+
+                if !tap.is_null() {
+                    ACTIVE_TAP_PORT.store(tap as i64, Ordering::Relaxed);
+                    crate::carbon_hotkeys::sync_window_tiling_carbon_hotkeys();
+                    let src = CFMachPortCreateRunLoopSource(std::ptr::null(), tap, 0);
+                    let rl = CFRunLoopGetCurrent();
+                    CFRunLoopAddSource(rl, src, kCFRunLoopCommonModes);
+                    let should_enable = core_window::is_accessibility_trusted()
+                        && crate::config::get_input_config().needs_event_tap();
+                    CGEventTapEnable(tap, should_enable);
+                    CFRunLoopRun();
+                    break;
+                }
             }
         })
         .expect("Failed to spawn CGEventTap thread");

@@ -22,7 +22,7 @@ pub use config::{
     keycode_and_flags_to_shortcut, shortcut_to_carbon_keycode_and_modifiers, shortcuts_match,
     update_input_config, AppMouseProfile, InputAutomationConfig, UiOverlayEvent,
 };
-pub use event_tap::{start_global_input_tap, sync_event_tap_enabled};
+pub use event_tap::{notify_permissions_changed, start_global_input_tap, sync_event_tap_enabled};
 pub use spaces::{
     frontmost_app_info, get_spaces_status, list_installed_gui_apps, list_running_gui_apps,
     pick_application_bundle_dialog, query_macos_spaces_counts, read_app_bundle_info,

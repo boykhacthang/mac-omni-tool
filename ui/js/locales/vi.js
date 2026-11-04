@@ -679,6 +679,20 @@ window.OMNI_LOCALES.vi = {
     "update.toast_kept_current": "📌 Đã giữ nguyên phiên bản hiện tại (bỏ qua v{latest}).",
     "update.toast_disabled_checks": "🔒 Đã bật chế độ giữ nguyên phiên bản hiện tại & ngừng kiểm tra cập nhật.",
     "update.toast_enabled_checks": "🔔 Đã bật lại tự động kiểm tra cập nhật.",
-    "update.toast_failed": "Không thể kiểm tra cập nhật: {error}"
+    "update.toast_failed": "Không thể kiểm tra cập nhật: {error}",
+    "perm.toast_need_accessibility": "🛡️ Vui lòng cấp quyền Accessibility (Trợ năng) trong mục Cài đặt Quyền trên App trước khi mở tính năng này!",
+    "perm.toast_need_screen_recording": "🛡️ Vui lòng cấp quyền Ghi màn hình (Screen Recording) trong mục Cài đặt Quyền trên App trước khi chụp màn hình!",
+    "perm.toast_need_generic": "🛡️ Vui lòng cấp quyền cần thiết trong mục Cài đặt Quyền trên App!",
+    "perm.toast_opened_macos_settings": "Đã mở Cài đặt macOS. Hãy gạt bật Mac Omni Tool rồi quay lại ứng dụng!",
+    "perm.btn_open_app_perms": "🛡️ Vào Cài đặt Quyền trên App",
+    "perm.btn_grant_inline": "🛡️ Cấp quyền",
+    "perm.mouse_banner_title": "🛡️ Tính năng Chuột rời & Cuộn mượt 120Hz cần quyền Accessibility (Trợ năng)",
+    "perm.mouse_banner_sub": "Ứng dụng không tự hỏi quyền khi khởi động. Để mở tính năng Chuột rời, hãy vào Cài đặt Quyền trên App để cấp quyền Accessibility.",
+    "perm.tiling_banner_title": "🛡️ Tính năng Chia & Gắn cửa sổ cần quyền Accessibility (Trợ năng)",
+    "perm.tiling_banner_sub": "Ứng dụng không tự hỏi quyền khi khởi động. Để mở tính năng Chia & Gắn cửa sổ, hãy vào Cài đặt Quyền trên App để cấp quyền Accessibility.",
+    "perm.desc_accessibility": "Chuột rời & Cuộn mượt 120Hz, Chia cửa sổ, Alt-Tab, Cắt/Dán Finder",
+    "perm.desc_screen_recording": "Chụp màn hình 2 màn hình & Vẽ chú thích",
+    "perm.desc_full_disk": "Tuỳ chọn: Quét sâu Thùng rác & Gỡ tận gốc Containers",
+    "perm.card_footer_note": "Ứng dụng không tự bật bảng xin quyền khi khởi động. Khi bấm 'Cấp quyền', nếu trước đó bạn đã từng gạt ON từ bản build cũ, App sẽ tự làm mới mục quyền cũ để bạn gạt ON lại 1 lần trong Cài đặt macOS rồi quay lại App."
   }
 };

@@ -4,6 +4,11 @@
 let settingsSubTab = "shortcuts";
 
 async function renderUnifiedSettingsScreen(view) {
+  if (window.__settingsInitialSubTab) {
+    settingsSubTab = window.__settingsInitialSubTab;
+    window.__settingsInitialSubTab = null;
+  }
+  const highlightedPerm = window.__highlightedPermKind || "";
   const [cfg, auto, perms, dispState, mbStats] = await Promise.all([
     api("get_input_config"),
     api("get_autostart_status"),
@@ -11,14 +16,18 @@ async function renderUnifiedSettingsScreen(view) {
     api("get_display_state"),
     api("get_menubar_stats").catch(() => null)
   ]);
+  const axGranted = !!(perms && perms.accessibility_granted);
+  const srGranted = !!(perms && perms.screen_recording_granted);
   const displays = (dispState && dispState.displays) ? dispState.displays : [];
-  const shotMaster = cfg.screenshot_enabled !== false;
+  const shotMaster = srGranted && cfg.screenshot_enabled !== false;
   const shotRegion = shotMaster && cfg.screenshot_region_enabled !== false;
   const shotFullEdit = shotMaster && cfg.screenshot_fullscreen_edit_enabled !== false;
   const shotFullCopy = shotMaster && cfg.screenshot_fullscreen_copy_enabled !== false;
   const clipEnabled = cfg.clipboard_enabled !== false;
-  const altTabEnabled = cfg.replace_macos_cmd_tab !== false;
-  const extMouseEnabled = cfg.external_mouse_enabled !== false;
+  const altTabEnabled = axGranted && cfg.replace_macos_cmd_tab !== false;
+  const snappingEnabled = axGranted && cfg.window_snapping_enabled !== false;
+  const finderCutEnabled = axGranted && !!cfg.finder_cut_paste_enabled;
+  const extMouseEnabled = axGranted && cfg.external_mouse_enabled !== false;
   const mouseChordEnabled = extMouseEnabled && !!cfg.mouse_chord_enabled;
   const mcEnabled = !!cfg.mission_control_shortcut;
 
@@ -216,9 +225,13 @@ async function renderUnifiedSettingsScreen(view) {
               ${renderTip(t("settings.feat_screenshot_tip"))}
             </span>
             <div style="display:flex;align-items:center;gap:8px;">
-              <span class="stat-sub">${t("settings.master_label")}</span>
+              ${!srGranted ? `
+                <button class="btn btn-sm btn-primary btn-goto-perm-tab" data-kind="screen_recording" style="padding:2px 8px;font-size:11px;">
+                  ${t("perm.btn_grant_inline")}
+                </button>
+              ` : `<span class="stat-sub">${t("settings.master_label")}</span>`}
               <label class="switch">
-                <input type="checkbox" id="chk-screenshot-enabled" ${cfg.screenshot_enabled !== false ? 'checked' : ''} />
+                <input type="checkbox" id="chk-screenshot-enabled" ${shotMaster ? 'checked' : ''} />
                 <span class="slider-toggle"></span>
               </label>
             </div>
@@ -282,10 +295,17 @@ async function renderUnifiedSettingsScreen(view) {
 
           <div class="setting-row" style="border-bottom:1px solid var(--border);">
             <span style="font-weight:500;">${t("tiling.page_title")}</span>
-            <label class="switch">
-              <input type="checkbox" id="chk-snapping-enabled" ${cfg.window_snapping_enabled !== false ? 'checked' : ''} />
-              <span class="slider-toggle"></span>
-            </label>
+            <div style="display:flex;align-items:center;gap:8px;">
+              ${!axGranted ? `
+                <button class="btn btn-sm btn-primary btn-goto-perm-tab" data-kind="accessibility" style="padding:2px 8px;font-size:11px;">
+                  ${t("perm.btn_grant_inline")}
+                </button>
+              ` : ""}
+              <label class="switch">
+                <input type="checkbox" id="chk-snapping-enabled" ${snappingEnabled ? 'checked' : ''} />
+                <span class="slider-toggle"></span>
+              </label>
+            </div>
           </div>
 
           <div class="setting-row" style="border-bottom:1px solid var(--border);">
@@ -305,9 +325,14 @@ async function renderUnifiedSettingsScreen(view) {
               ${renderTip(t("settings.alttab_tip"))}
             </span>
             <div style="display:flex;align-items:center;gap:8px;">
+              ${!axGranted ? `
+                <button class="btn btn-sm btn-primary btn-goto-perm-tab" data-kind="accessibility" style="padding:2px 8px;font-size:11px;">
+                  ${t("perm.btn_grant_inline")}
+                </button>
+              ` : ""}
               <div class="shortcut-recorder sys-shortcut" data-field="alt_tab_shortcut" style="${altTabEnabled ? '' : 'pointer-events:none;opacity:0.6;'}">${escapeHtml(cfg.alt_tab_shortcut || 'Cmd+Tab')}</div>
               <label class="switch">
-                <input type="checkbox" id="chk-replace-cmdtab" ${cfg.replace_macos_cmd_tab !== false ? 'checked' : ''} />
+                <input type="checkbox" id="chk-replace-cmdtab" ${altTabEnabled ? 'checked' : ''} />
                 <span class="slider-toggle"></span>
               </label>
             </div>
@@ -318,10 +343,17 @@ async function renderUnifiedSettingsScreen(view) {
               ${t("settings.finder_cut_title")}
               ${renderTip(t("settings.finder_cut_tip"))}
             </span>
-            <label class="switch">
-              <input type="checkbox" id="chk-finder-cut" ${cfg.finder_cut_paste_enabled ? 'checked' : ''} />
-              <span class="slider-toggle"></span>
-            </label>
+            <div style="display:flex;align-items:center;gap:8px;">
+              ${!axGranted ? `
+                <button class="btn btn-sm btn-primary btn-goto-perm-tab" data-kind="accessibility" style="padding:2px 8px;font-size:11px;">
+                  ${t("perm.btn_grant_inline")}
+                </button>
+              ` : ""}
+              <label class="switch">
+                <input type="checkbox" id="chk-finder-cut" ${finderCutEnabled ? 'checked' : ''} />
+                <span class="slider-toggle"></span>
+              </label>
+            </div>
           </div>
         </div>
 
@@ -339,10 +371,17 @@ async function renderUnifiedSettingsScreen(view) {
 
           <div class="setting-row" style="border-bottom:1px solid var(--border);">
             <span style="font-weight:600;color:var(--accent);">${t("settings.ext_mouse_master")}</span>
-            <label class="switch">
-              <input type="checkbox" id="chk-settings-ext-mouse" ${cfg.external_mouse_enabled !== false ? 'checked' : ''} />
-              <span class="slider-toggle"></span>
-            </label>
+            <div style="display:flex;align-items:center;gap:8px;">
+              ${!axGranted ? `
+                <button class="btn btn-sm btn-primary btn-goto-perm-tab" data-kind="accessibility" style="padding:2px 8px;font-size:11px;">
+                  ${t("perm.btn_grant_inline")}
+                </button>
+              ` : ""}
+              <label class="switch">
+                <input type="checkbox" id="chk-settings-ext-mouse" ${extMouseEnabled ? 'checked' : ''} />
+                <span class="slider-toggle"></span>
+              </label>
+            </div>
           </div>
 
           <div class="setting-row" style="border-bottom:1px solid var(--border);${extMouseEnabled ? '' : 'opacity:0.55;'}">
@@ -433,7 +472,7 @@ async function renderUnifiedSettingsScreen(view) {
         </div>
 
         <!-- SYSTEM PERMISSIONS -->
-        <div class="card">
+        <div class="card" style="border:${highlightedPerm ? '1px solid rgba(245,158,11,0.65)' : '1px solid var(--border)'};">
           <div class="card-header">
             <div class="card-title">
               ${t("settings.card_perms_title")}
@@ -444,23 +483,49 @@ async function renderUnifiedSettingsScreen(view) {
 
           <table>
             <tbody>
-              <tr>
-                <td style="font-weight:600;">Accessibility</td>
+              <tr style="${highlightedPerm === 'accessibility' ? 'background:rgba(245,158,11,0.12);' : ''}">
+                <td>
+                  <div style="font-weight:700;">Accessibility (Trợ năng)</div>
+                  <div class="stat-sub" style="font-size:10.5px;">
+                    ${t("perm.desc_accessibility")}
+                  </div>
+                </td>
                 <td><span class="${perms.accessibility_granted ? 'badge-ok' : 'badge-warn'}">${perms.accessibility_granted ? t("settings.perm_granted") : t("settings.perm_not_granted")}</span></td>
-                <td style="text-align:right;"><button class="btn btn-sm perm-btn" data-kind="accessibility">${t("settings.btn_grant")}</button></td>
+                <td style="text-align:right;">
+                  <button class="btn btn-sm ${perms.accessibility_granted ? '' : 'btn-primary'} perm-btn" data-kind="accessibility">
+                    ${perms.accessibility_granted ? t("settings.btn_open_settings") : t("settings.btn_grant")}
+                  </button>
+                </td>
               </tr>
-              <tr>
-                <td style="font-weight:600;">Screen Recording</td>
+              <tr style="${highlightedPerm === 'screen_recording' ? 'background:rgba(245,158,11,0.12);' : ''}">
+                <td>
+                  <div style="font-weight:700;">Screen Recording (Ghi màn hình)</div>
+                  <div class="stat-sub" style="font-size:10.5px;">
+                    ${t("perm.desc_screen_recording")}
+                  </div>
+                </td>
                 <td><span class="${perms.screen_recording_granted ? 'badge-ok' : 'badge-warn'}">${perms.screen_recording_granted ? t("settings.perm_granted") : t("settings.perm_not_granted")}</span></td>
-                <td style="text-align:right;"><button class="btn btn-sm perm-btn" data-kind="screen_recording">${t("settings.btn_grant")}</button></td>
+                <td style="text-align:right;">
+                  <button class="btn btn-sm ${perms.screen_recording_granted ? '' : 'btn-primary'} perm-btn" data-kind="screen_recording">
+                    ${perms.screen_recording_granted ? t("settings.btn_open_settings") : t("settings.btn_grant")}
+                  </button>
+                </td>
               </tr>
-              <tr>
-                <td style="font-weight:600;">Full Disk Access</td>
+              <tr style="${highlightedPerm === 'full_disk' ? 'background:rgba(245,158,11,0.12);' : ''}">
+                <td>
+                  <div style="font-weight:700;">Full Disk Access</div>
+                  <div class="stat-sub" style="font-size:10.5px;">
+                    ${t("perm.desc_full_disk")}
+                  </div>
+                </td>
                 <td><span class="${perms.full_disk_access_granted ? 'badge-ok' : 'badge-warn'}">${perms.full_disk_access_granted ? t("settings.perm_granted") : t("settings.perm_optional")}</span></td>
                 <td style="text-align:right;"><button class="btn btn-sm perm-btn" data-kind="full_disk">${t("settings.btn_open_settings")}</button></td>
               </tr>
             </tbody>
           </table>
+          <div class="stat-sub" style="margin-top:8px;padding:7px 10px;border-radius:7px;background:var(--bg-input);border:1px solid var(--border);font-size:11px;line-height:1.45;">
+            💡 ${t("perm.card_footer_note")}
+          </div>
         </div>
       </div>
 
@@ -469,10 +534,10 @@ async function renderUnifiedSettingsScreen(view) {
         <div class="card-header" style="flex-wrap:wrap;gap:10px;margin-bottom:8px;">
           <div class="card-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <span>💡 ${t("settings.about_community_title")}</span>
-            <span class="badge-ok">v2.1.0 • MIT License</span>
+            <span class="badge-ok">v2.1.1 • MIT License</span>
             ${cfg.auto_check_updates === false ? `
               <span class="badge-ok" style="font-size:11px;">
-                ${escapeHtml(t("update.keep_current_mode_badge", { version: "2.1.0" }))}
+                ${escapeHtml(t("update.keep_current_mode_badge", { version: "2.1.1" }))}
               </span>
             ` : ""}
           </div>
@@ -577,19 +642,19 @@ async function renderUnifiedSettingsScreen(view) {
 
     const updated = {
       ...cfg,
-      screenshot_enabled: chkVal("chk-screenshot-enabled", cfg.screenshot_enabled !== false),
-      screenshot_region_enabled: chkVal("chk-shot-region-enabled", cfg.screenshot_region_enabled !== false),
-      screenshot_fullscreen_edit_enabled: chkVal("chk-shot-fulledit-enabled", cfg.screenshot_fullscreen_edit_enabled !== false),
-      screenshot_fullscreen_copy_enabled: chkVal("chk-shot-fullcopy-enabled", cfg.screenshot_fullscreen_copy_enabled !== false),
+      screenshot_enabled: srGranted ? chkVal("chk-screenshot-enabled", cfg.screenshot_enabled !== false) : (cfg.screenshot_enabled !== false),
+      screenshot_region_enabled: srGranted ? chkVal("chk-shot-region-enabled", cfg.screenshot_region_enabled !== false) : (cfg.screenshot_region_enabled !== false),
+      screenshot_fullscreen_edit_enabled: srGranted ? chkVal("chk-shot-fulledit-enabled", cfg.screenshot_fullscreen_edit_enabled !== false) : (cfg.screenshot_fullscreen_edit_enabled !== false),
+      screenshot_fullscreen_copy_enabled: srGranted ? chkVal("chk-shot-fullcopy-enabled", cfg.screenshot_fullscreen_copy_enabled !== false) : (cfg.screenshot_fullscreen_copy_enabled !== false),
       screenshot_display_id: 0,
-      window_snapping_enabled: chkVal("chk-snapping-enabled", cfg.window_snapping_enabled !== false),
+      window_snapping_enabled: axGranted ? chkVal("chk-snapping-enabled", cfg.window_snapping_enabled !== false) : (cfg.window_snapping_enabled !== false),
       clipboard_enabled: chkVal("chk-clipboard-enabled", cfg.clipboard_enabled !== false),
-      replace_macos_cmd_tab: chkVal("chk-replace-cmdtab", cfg.replace_macos_cmd_tab !== false),
-      finder_cut_paste_enabled: chkVal("chk-finder-cut", !!cfg.finder_cut_paste_enabled),
-      external_mouse_enabled: chkVal("chk-settings-ext-mouse", cfg.external_mouse_enabled !== false),
-      invert_external_mouse_scroll: chkVal("chk-settings-invert-scroll", !!cfg.invert_external_mouse_scroll),
-      smooth_scroll_enabled: chkVal("chk-settings-smooth-scroll", cfg.smooth_scroll_enabled !== false),
-      mouse_chord_enabled: chkVal("chk-mouse-chord", !!cfg.mouse_chord_enabled),
+      replace_macos_cmd_tab: axGranted ? chkVal("chk-replace-cmdtab", cfg.replace_macos_cmd_tab !== false) : (cfg.replace_macos_cmd_tab !== false),
+      finder_cut_paste_enabled: axGranted ? chkVal("chk-finder-cut", !!cfg.finder_cut_paste_enabled) : !!cfg.finder_cut_paste_enabled,
+      external_mouse_enabled: axGranted ? chkVal("chk-settings-ext-mouse", cfg.external_mouse_enabled !== false) : (cfg.external_mouse_enabled !== false),
+      invert_external_mouse_scroll: axGranted ? chkVal("chk-settings-invert-scroll", !!cfg.invert_external_mouse_scroll) : !!cfg.invert_external_mouse_scroll,
+      smooth_scroll_enabled: axGranted ? chkVal("chk-settings-smooth-scroll", cfg.smooth_scroll_enabled !== false) : (cfg.smooth_scroll_enabled !== false),
+      mouse_chord_enabled: axGranted ? chkVal("chk-mouse-chord", !!cfg.mouse_chord_enabled) : !!cfg.mouse_chord_enabled,
       mouse_chord_action: selVal("sel-mouse-action", cfg.mouse_chord_action),
       mouse_chord_threshold_ms: numVal("slider-chord-ms", cfg.mouse_chord_threshold_ms),
       menubar_enabled: effectiveMbEnabled,
@@ -627,9 +692,44 @@ async function renderUnifiedSettingsScreen(view) {
     if (el) el.onclick = fn;
   };
 
-  bindChange("chk-settings-ext-mouse", () => saveCfg());
-  bindChange("chk-settings-invert-scroll", () => saveCfg());
-  bindChange("chk-settings-smooth-scroll", () => saveCfg());
+  view.querySelectorAll(".btn-goto-perm-tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (typeof window.openPermissionsSettings === "function") {
+        window.openPermissionsSettings(btn.dataset.kind || "accessibility");
+      }
+    });
+  });
+
+  bindChange("chk-settings-ext-mouse", (e) => {
+    if (!axGranted) {
+      e.target.checked = false;
+      if (typeof window.openPermissionsSettings === "function") {
+        window.openPermissionsSettings("accessibility");
+      }
+      return;
+    }
+    saveCfg();
+  });
+  bindChange("chk-settings-invert-scroll", (e) => {
+    if (!axGranted) {
+      e.target.checked = false;
+      if (typeof window.openPermissionsSettings === "function") {
+        window.openPermissionsSettings("accessibility");
+      }
+      return;
+    }
+    saveCfg();
+  });
+  bindChange("chk-settings-smooth-scroll", (e) => {
+    if (!axGranted) {
+      e.target.checked = false;
+      if (typeof window.openPermissionsSettings === "function") {
+        window.openPermissionsSettings("accessibility");
+      }
+      return;
+    }
+    saveCfg();
+  });
 
   bindChange("chk-menubar-enabled", (e) => {
     const enabled = e.target.checked;
@@ -664,26 +764,107 @@ async function renderUnifiedSettingsScreen(view) {
     api("hide_launcher");
   });
 
-  bindClick("btn-test-screenshot", () => api("trigger_screenshot"));
-  bindClick("btn-try-shot-region", () => api("trigger_screenshot"));
+  bindClick("btn-test-screenshot", () => {
+    if (!srGranted) {
+      if (typeof window.openPermissionsSettings === "function") {
+        window.openPermissionsSettings("screen_recording");
+      }
+      return;
+    }
+    api("trigger_screenshot");
+  });
+  bindClick("btn-try-shot-region", () => {
+    if (!srGranted) {
+      if (typeof window.openPermissionsSettings === "function") {
+        window.openPermissionsSettings("screen_recording");
+      }
+      return;
+    }
+    api("trigger_screenshot");
+  });
   bindClick("btn-try-shot-fulledit", () => {
+    if (!srGranted) {
+      if (typeof window.openPermissionsSettings === "function") {
+        window.openPermissionsSettings("screen_recording");
+      }
+      return;
+    }
     api("trigger_fullscreen_screenshot", { display_id: 0, instant_copy: false });
   });
   bindClick("btn-try-shot-fullcopy", () => {
+    if (!srGranted) {
+      if (typeof window.openPermissionsSettings === "function") {
+        window.openPermissionsSettings("screen_recording");
+      }
+      return;
+    }
     api("trigger_fullscreen_screenshot", { display_id: 0, instant_copy: true });
   });
   bindClick("btn-test-mc", () => api("trigger_system_action", { action: "mission_control" }));
-  bindClick("btn-launch-alttab-hud", () => api("toggle_overlay", { window: "alttab" }));
+  bindClick("btn-launch-alttab-hud", () => {
+    if (!axGranted) {
+      if (typeof window.openPermissionsSettings === "function") {
+        window.openPermissionsSettings("accessibility");
+      }
+      return;
+    }
+    api("toggle_overlay", { window: "alttab" });
+  });
 
-  bindChange("chk-screenshot-enabled", () => saveCfg());
+  bindChange("chk-screenshot-enabled", (e) => {
+    if (!srGranted) {
+      e.target.checked = false;
+      if (typeof window.openPermissionsSettings === "function") {
+        window.openPermissionsSettings("screen_recording");
+      }
+      return;
+    }
+    saveCfg();
+  });
   bindChange("chk-shot-region-enabled", () => saveCfg());
   bindChange("chk-shot-fulledit-enabled", () => saveCfg());
   bindChange("chk-shot-fullcopy-enabled", () => saveCfg());
-  bindChange("chk-snapping-enabled", () => saveCfg());
+  bindChange("chk-snapping-enabled", (e) => {
+    if (!axGranted) {
+      e.target.checked = false;
+      if (typeof window.openPermissionsSettings === "function") {
+        window.openPermissionsSettings("accessibility");
+      }
+      return;
+    }
+    saveCfg();
+  });
   bindChange("chk-clipboard-enabled", () => saveCfg());
-  bindChange("chk-replace-cmdtab", () => saveCfg());
-  bindChange("chk-finder-cut", () => saveCfg());
-  bindChange("chk-mouse-chord", () => saveCfg());
+  bindChange("chk-replace-cmdtab", (e) => {
+    if (!axGranted) {
+      e.target.checked = false;
+      if (typeof window.openPermissionsSettings === "function") {
+        window.openPermissionsSettings("accessibility");
+      }
+      return;
+    }
+    saveCfg();
+  });
+  bindChange("chk-finder-cut", (e) => {
+    if (!axGranted) {
+      e.target.checked = false;
+      if (typeof window.openPermissionsSettings === "function") {
+        window.openPermissionsSettings("accessibility");
+      }
+      return;
+    }
+    saveCfg();
+  });
+  bindChange("chk-mouse-chord", (e) => {
+    if (!axGranted) {
+      e.target.checked = false;
+      if (typeof window.openPermissionsSettings === "function") {
+        window.openPermissionsSettings("accessibility");
+      }
+      return;
+    }
+    saveCfg();
+  });
   bindChange("sel-mouse-action", () => saveCfg());
 
   const sliderChord = document.getElementById("slider-chord-ms");
@@ -743,6 +924,9 @@ async function renderUnifiedSettingsScreen(view) {
   });
 
   view.querySelectorAll(".perm-btn").forEach(btn => {
-    btn.addEventListener("click", () => api("open_permission", { kind: btn.dataset.kind }));
+    btn.addEventListener("click", async () => {
+      await api("open_permission", { kind: btn.dataset.kind });
+      showToast(t("perm.toast_opened_macos_settings"));
+    });
   });
 }

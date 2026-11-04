@@ -681,6 +681,20 @@ window.OMNI_LOCALES.en = {
     "update.toast_kept_current": "📌 Kept current version (skipped v{latest}).",
     "update.toast_disabled_checks": "🔒 Locked current version & disabled automatic update checks.",
     "update.toast_enabled_checks": "🔔 Re-enabled automatic update checks.",
-    "update.toast_failed": "Update check failed: {error}"
+    "update.toast_failed": "Update check failed: {error}",
+    "perm.toast_need_accessibility": "🛡️ Please grant Accessibility permission in App Settings → System & Permissions first!",
+    "perm.toast_need_screen_recording": "🛡️ Please grant Screen Recording permission in App Settings → System & Permissions first!",
+    "perm.toast_need_generic": "🛡️ Please grant the required permission in App Settings → System & Permissions!",
+    "perm.toast_opened_macos_settings": "Opened macOS System Settings. Toggle Mac Omni Tool ON, then return to the app!",
+    "perm.btn_open_app_perms": "🛡️ Open App Permissions Settings",
+    "perm.btn_grant_inline": "🛡️ Grant Permission",
+    "perm.mouse_banner_title": "🛡️ Accessibility Permission Required for External Mouse & 120Hz Smooth Scroll",
+    "perm.mouse_banner_sub": "App does not auto-prompt on launch. To enable External Mouse features, go to App Permissions Settings and grant Accessibility.",
+    "perm.tiling_banner_title": "🛡️ Accessibility Permission Required for Window Tiling",
+    "perm.tiling_banner_sub": "App does not auto-prompt on launch. To enable Window Tiling shortcuts, go to App Permissions Settings and grant Accessibility.",
+    "perm.desc_accessibility": "External Mouse 120Hz, Window Tiling, Alt-Tab, Finder Cut/Paste",
+    "perm.desc_screen_recording": "Dual-Monitor Region Screenshot & Annotation",
+    "perm.desc_full_disk": "Optional: Deep Trash & App Containers cleanup",
+    "perm.card_footer_note": "App never prompts for permissions automatically on launch. Clicking 'Grant' automatically resets any stale entry from older builds so you can toggle Mac Omni Tool ON cleanly in System Settings, then return to the app."
   }
 };

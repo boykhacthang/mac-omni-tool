@@ -71,6 +71,8 @@ function createMouseScreen({ isTabActive } = {}) {
     stopPolling();
     const res = await api("get_mouse_state");
     const cfg = (res && res.config) ? res.config : await api("get_input_config");
+    const perms = (res && res.permissions) ? res.permissions : await api("get_permissions_status");
+    const axGranted = !!(perms && perms.accessibility_granted);
     const spaces = (res && res.spaces) ? res.spaces : {
       total_spaces: 1,
       primary_display_spaces: 1,
@@ -118,7 +120,7 @@ function createMouseScreen({ isTabActive } = {}) {
       a => a.bundle_id && !existingBundles.has(a.bundle_id.toLowerCase())
     );
 
-    const masterEnabled = cfg.external_mouse_enabled !== false;
+    const masterEnabled = axGranted && cfg.external_mouse_enabled !== false;
     const buttonsEnabled = masterEnabled && cfg.mouse_buttons_enabled !== false;
     const smoothEnabled = masterEnabled && cfg.smooth_scroll_enabled !== false;
     const chordEnabled = masterEnabled && !!cfg.mouse_chord_enabled;
@@ -141,6 +143,22 @@ function createMouseScreen({ isTabActive } = {}) {
           </button>
         </div>
       </div>
+
+      ${!axGranted ? `
+        <div class="card" style="margin-bottom:10px;padding:11px 14px;border:1px solid rgba(245,158,11,0.55);background:rgba(245,158,11,0.08);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+          <div style="display:flex;flex-direction:column;gap:3px;">
+            <div style="font-weight:700;font-size:13px;color:#f59e0b;">
+              ${t("perm.mouse_banner_title")}
+            </div>
+            <div class="stat-sub" style="font-size:11.5px;">
+              ${t("perm.mouse_banner_sub")}
+            </div>
+          </div>
+          <button class="btn btn-sm btn-primary" id="btn-mouse-goto-perms">
+            ${t("perm.btn_open_app_perms")}
+          </button>
+        </div>
+      ` : ""}
 
       <div class="subtab-bar">
         <div class="pill-tabs" id="mouse-subtabs">
@@ -166,13 +184,13 @@ function createMouseScreen({ isTabActive } = {}) {
       <!-- TOP 3 COMPACT QUICK SWITCH CARDS: MASTER, REVERSE SCROLL, SMOOTH SCROLL -->
       <div class="grid-3" style="margin-bottom:10px;">
         <!-- 1. Master Switch -->
-        <div class="card" style="margin-bottom:0;padding:10px 13px;border-color:${cfg.external_mouse_enabled !== false ? 'rgba(59,130,246,0.35)' : 'var(--border)'};">
+        <div class="card" style="margin-bottom:0;padding:10px 13px;border-color:${masterEnabled ? 'rgba(59,130,246,0.35)' : 'var(--border)'};">
           <div class="card-header" style="margin-bottom:2px;">
             <div class="card-title" style="font-size:13px;">
               <span>🖱️ ${t("mouse.card_master_title")}</span>
             </div>
             <label class="switch">
-              <input type="checkbox" id="chk-ext-mouse-master" ${cfg.external_mouse_enabled !== false ? "checked" : ""} />
+              <input type="checkbox" id="chk-ext-mouse-master" ${masterEnabled ? "checked" : ""} />
               <span class="slider-toggle"></span>
             </label>
           </div>
@@ -650,15 +668,48 @@ function createMouseScreen({ isTabActive } = {}) {
       await render(view);
     };
 
+    const gotoPermsBtn = document.getElementById("btn-mouse-goto-perms");
+    if (gotoPermsBtn) {
+      gotoPermsBtn.onclick = () => {
+        if (typeof window.openPermissionsSettings === "function") {
+          window.openPermissionsSettings("accessibility");
+        }
+      };
+    }
+
     // Top 3 Quick Switches
-    document.getElementById("chk-ext-mouse-master").onchange = (e) =>
+    document.getElementById("chk-ext-mouse-master").onchange = (e) => {
+      if (!axGranted) {
+        e.target.checked = false;
+        if (typeof window.openPermissionsSettings === "function") {
+          window.openPermissionsSettings("accessibility");
+        }
+        return;
+      }
       saveConfigPatch(c => { c.external_mouse_enabled = e.target.checked; });
+    };
 
-    document.getElementById("chk-invert-scroll-top").onchange = (e) =>
+    document.getElementById("chk-invert-scroll-top").onchange = (e) => {
+      if (!axGranted) {
+        e.target.checked = false;
+        if (typeof window.openPermissionsSettings === "function") {
+          window.openPermissionsSettings("accessibility");
+        }
+        return;
+      }
       saveConfigPatch(c => { c.invert_external_mouse_scroll = e.target.checked; });
+    };
 
-    document.getElementById("chk-smooth-scroll-top").onchange = (e) =>
+    document.getElementById("chk-smooth-scroll-top").onchange = (e) => {
+      if (!axGranted) {
+        e.target.checked = false;
+        if (typeof window.openPermissionsSettings === "function") {
+          window.openPermissionsSettings("accessibility");
+        }
+        return;
+      }
       saveConfigPatch(c => { c.smooth_scroll_enabled = e.target.checked; });
+    };
 
     if (mouseSubTab === "buttons") {
       document.getElementById("chk-mouse-buttons-enabled").onchange = (e) =>
