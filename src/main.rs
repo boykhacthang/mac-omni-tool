@@ -10,9 +10,10 @@ mod webview;
 use crate::events::{screenshot_session, AppUserEvent, ScreenshotSlotData, MAX_SCREENSHOT_SLOTS};
 use crate::macos_window::{
     disable_macos_window_restoration, focus_and_elevate_macos_window,
-    park_overlay_window_offscreen, place_main_window_center_75_full_height,
-    prepare_screenshot_window_hidden, restore_previous_frontmost_app, reveal_screenshot_window,
-    set_macos_dock_icon_visible, set_nswindow_non_restorable, set_nswindow_rounded_transparent,
+    hide_floating_overlay_window, is_any_nswindow_focused, park_overlay_window_offscreen,
+    place_main_window_center_75_full_height, prepare_screenshot_window_hidden,
+    restore_previous_frontmost_app, reveal_screenshot_window, set_macos_dock_icon_visible,
+    set_nswindow_non_restorable, set_nswindow_rounded_transparent, show_floating_overlay_window,
     snap_nswindow_directly,
 };
 use crate::menubar::{
@@ -134,6 +135,7 @@ fn main() {
         .expect("Failed to create menu bar popover window");
     unsafe {
         set_nswindow_rounded_transparent(&mini_window, 14.0);
+        hide_floating_overlay_window(&mini_window);
     }
 
     let mini_webview = build_webview_with_api(
@@ -144,6 +146,7 @@ fn main() {
     .expect("Failed to build menu bar popover WebView");
     unsafe {
         set_nswindow_rounded_transparent(&mini_window, 14.0);
+        hide_floating_overlay_window(&mini_window);
     }
 
     // Window 1: Main Launcher Dashboard Window (Default: Center 75% width, full vertical height right against the Dock)
@@ -190,6 +193,7 @@ fn main() {
         .expect("Failed to create left clipboard drawer window");
     unsafe {
         set_nswindow_rounded_transparent(&clip_window, 14.0);
+        hide_floating_overlay_window(&clip_window);
     }
 
     let clip_webview = build_webview_with_api(
@@ -200,6 +204,7 @@ fn main() {
     .expect("Failed to build clipboard WebView");
     unsafe {
         set_nswindow_rounded_transparent(&clip_window, 14.0);
+        hide_floating_overlay_window(&clip_window);
     }
 
     // Window 3: Alt-Tab Live Preview Overlay Window (Option + Tab / Cmd + Tab -> Centered on current mouse monitor)
@@ -220,6 +225,7 @@ fn main() {
         .expect("Failed to create Alt-Tab overlay window");
     unsafe {
         set_nswindow_rounded_transparent(&alttab_window, 14.0);
+        hide_floating_overlay_window(&alttab_window);
     }
 
     let alttab_webview = build_webview_with_api(
@@ -230,6 +236,7 @@ fn main() {
     .expect("Failed to build Alt-Tab WebView");
     unsafe {
         set_nswindow_rounded_transparent(&alttab_window, 14.0);
+        hide_floating_overlay_window(&alttab_window);
     }
 
     // Window Pool 4: Multi-Monitor Screenshot Overlay Windows
@@ -288,13 +295,17 @@ fn main() {
                     let cfg = core_input::get_input_config();
                     if !cfg.menubar_enabled || cfg.menubar_display_mode == "hidden" {
                         if mini_window.is_visible() {
-                            mini_window.set_visible(false);
+                            unsafe {
+                                hide_floating_overlay_window(&mini_window);
+                            }
                         }
                         return;
                     }
                     let vis = mini_window.is_visible();
                     if vis {
-                        mini_window.set_visible(false);
+                        unsafe {
+                            hide_floating_overlay_window(&mini_window);
+                        }
                     } else {
                         let (mx, _my) = core_display::get_mouse_cursor_position();
                         let disp = core_display::get_display_at_mouse_cursor();
@@ -306,17 +317,21 @@ fn main() {
                         mini_window.set_inner_size(LogicalSize::new(mini_w, mini_h));
                         mini_window.set_outer_position(LogicalPosition::new(px, py));
                         unsafe {
-                            set_nswindow_rounded_transparent(&mini_window, 14.0);
+                            show_floating_overlay_window(&mini_window, 14.0);
                         }
-                        mini_window.set_visible(true);
-                        mini_window.set_focus();
                         let _ = mini_webview.evaluate_script(
                             "window.__refreshMiniPopover && window.__refreshMiniPopover();",
                         );
                     }
                 }
                 AppUserEvent::SetMiniExpanded(expanded) => {
-                    mini_window.set_visible(expanded);
+                    unsafe {
+                        if expanded {
+                            show_floating_overlay_window(&mini_window, 14.0);
+                        } else {
+                            hide_floating_overlay_window(&mini_window);
+                        }
+                    }
                 }
                 AppUserEvent::SetMiniHeight(h) => {
                     let clamped_h = h.clamp(310.0, 640.0).round();
@@ -444,7 +459,9 @@ fn main() {
                 AppUserEvent::ToggleClipboardDrawer => {
                     if !core_input::get_input_config().clipboard_enabled {
                         if clip_window.is_visible() {
-                            clip_window.set_visible(false);
+                            unsafe {
+                                hide_floating_overlay_window(&clip_window);
+                            }
                             if !alttab_window.is_visible()
                                 && !screenshot_windows.iter().any(|w| w.is_visible())
                             {
@@ -455,7 +472,9 @@ fn main() {
                     }
                     let vis = clip_window.is_visible();
                     if vis {
-                        clip_window.set_visible(false);
+                        unsafe {
+                            hide_floating_overlay_window(&clip_window);
+                        }
                         if !alttab_window.is_visible()
                             && !screenshot_windows.iter().any(|w| w.is_visible())
                         {
@@ -469,15 +488,18 @@ fn main() {
                             disp.x as f64 + 12.0,
                             disp.y as f64 + 38.0,
                         ));
-                        clip_window.set_visible(true);
-                        clip_window.set_focus();
+                        unsafe {
+                            show_floating_overlay_window(&clip_window, 14.0);
+                        }
                         core_input::set_overlay_escape_hotkey_active(true);
                         let _ = clip_webview
                             .evaluate_script("window.__refreshDrawer && window.__refreshDrawer();");
                     }
                 }
                 AppUserEvent::HideClipboardDrawer => {
-                    clip_window.set_visible(false);
+                    unsafe {
+                        hide_floating_overlay_window(&clip_window);
+                    }
                     if !alttab_window.is_visible()
                         && !screenshot_windows.iter().any(|w| w.is_visible())
                     {
@@ -487,7 +509,9 @@ fn main() {
                 AppUserEvent::ToggleAltTabOverlay => {
                     if !core_input::get_input_config().replace_macos_cmd_tab {
                         if alttab_window.is_visible() {
-                            alttab_window.set_visible(false);
+                            unsafe {
+                                hide_floating_overlay_window(&alttab_window);
+                            }
                             if !clip_window.is_visible()
                                 && !screenshot_windows.iter().any(|w| w.is_visible())
                             {
@@ -504,10 +528,11 @@ fn main() {
                     } else {
                         let disp = core_display::get_display_at_mouse_cursor();
                         let ax = disp.x as f64 + ((disp.width as f64 - alttab_w) / 2.0).max(20.0);
-                        let ay = disp.y as f64 + ((disp.height as f64 - alttab_h) / 2.0).max(20.0);
+                        let ay = disp.y as f64 + ((cur_disp.height as f64 - alttab_h) / 2.0).max(20.0);
                         alttab_window.set_outer_position(LogicalPosition::new(ax, ay));
-                        alttab_window.set_visible(true);
-                        alttab_window.set_focus();
+                        unsafe {
+                            show_floating_overlay_window(&alttab_window, 14.0);
+                        }
                         core_input::set_overlay_escape_hotkey_active(true);
                         let _ = alttab_webview
                             .evaluate_script("window.__refreshAltTab && window.__refreshAltTab();");
@@ -521,7 +546,9 @@ fn main() {
                     }
                 }
                 AppUserEvent::HideAltTabOverlay => {
-                    alttab_window.set_visible(false);
+                    unsafe {
+                        hide_floating_overlay_window(&alttab_window);
+                    }
                     if !clip_window.is_visible()
                         && !screenshot_windows.iter().any(|w| w.is_visible())
                     {
@@ -550,13 +577,19 @@ fn main() {
                         sess.capturing = true;
                     }
                     if mini_window.is_visible() {
-                        mini_window.set_visible(false);
+                        unsafe {
+                            hide_floating_overlay_window(&mini_window);
+                        }
                     }
                     if clip_window.is_visible() {
-                        clip_window.set_visible(false);
+                        unsafe {
+                            hide_floating_overlay_window(&clip_window);
+                        }
                     }
                     if alttab_window.is_visible() {
-                        alttab_window.set_visible(false);
+                        unsafe {
+                            hide_floating_overlay_window(&alttab_window);
+                        }
                     }
 
                     let prev_pid = core_window::frontmost_application_pid();
@@ -667,13 +700,19 @@ fn main() {
                         sess.capturing = true;
                     }
                     if mini_window.is_visible() {
-                        mini_window.set_visible(false);
+                        unsafe {
+                            hide_floating_overlay_window(&mini_window);
+                        }
                     }
                     if clip_window.is_visible() {
-                        clip_window.set_visible(false);
+                        unsafe {
+                            hide_floating_overlay_window(&clip_window);
+                        }
                     }
                     if alttab_window.is_visible() {
-                        alttab_window.set_visible(false);
+                        unsafe {
+                            hide_floating_overlay_window(&alttab_window);
+                        }
                     }
 
                     let prev_pid = core_window::frontmost_application_pid();
@@ -784,14 +823,22 @@ fn main() {
                         let _ = wv.evaluate_script(&script);
                     }
 
-                    // Safety fallback: ensure overlay reveals within 120ms even if a secondary monitor's rAF is throttled
+                    // Multi-monitor fallback: if a secondary monitor's rAF is throttled, reveal once the primary target slot is ready
                     let fallback_proxy = proxy.clone();
                     std::thread::spawn(move || {
-                        std::thread::sleep(std::time::Duration::from_millis(120));
+                        std::thread::sleep(std::time::Duration::from_millis(300));
                         let _ = fallback_proxy.send_event(AppUserEvent::RevealScreenshotSlot {
                             slot: usize::MAX,
                             seq,
                         });
+                    });
+
+                    // Safety watchdog: never allow an unrendered/hung WebView to sit in an active screenshot session
+                    let watchdog_proxy = proxy.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(1800));
+                        let _ =
+                            watchdog_proxy.send_event(AppUserEvent::ScreenshotRevealWatchdog(seq));
                     });
                 }
                 AppUserEvent::RevealScreenshotSlot { slot, seq } => {
@@ -803,21 +850,26 @@ fn main() {
                             if slot < sess.ready_slots.len() {
                                 sess.ready_slots[slot] = true;
                             }
-                            let all_ready =
-                                slot == usize::MAX || sess.ready_slots.iter().all(|&r| r);
+                            let target_is_ready = sess
+                                .ready_slots
+                                .get(sess.target_slot)
+                                .copied()
+                                .unwrap_or(false);
+                            let all_ready = sess.ready_slots.iter().all(|&r| r)
+                                || (slot == usize::MAX && target_is_ready);
                             if all_ready {
                                 sess.revealed = true;
-                                Some((sess.expected_slots, sess.target_slot))
+                                Some((sess.expected_slots, sess.target_slot, sess.ready_slots.clone()))
                             } else {
                                 None
                             }
                         }
                     };
 
-                    if let Some((num_slots, target_slot)) = reveal_params {
+                    if let Some((num_slots, target_slot, ready_slots)) = reveal_params {
                         let count = num_slots.min(MAX_SCREENSHOT_SLOTS);
                         for idx in 0..count {
-                            if idx != target_slot {
+                            if idx != target_slot && ready_slots.get(idx).copied().unwrap_or(false) {
                                 unsafe {
                                     reveal_screenshot_window(&screenshot_windows[idx], false);
                                 }
@@ -827,6 +879,27 @@ fn main() {
                             unsafe {
                                 reveal_screenshot_window(&screenshot_windows[target_slot], true);
                             }
+                        }
+                    }
+                }
+                AppUserEvent::ScreenshotRevealWatchdog(seq) => {
+                    let stuck = {
+                        let sess = screenshot_session().lock().unwrap();
+                        sess.capture_seq == seq && !sess.revealed && !sess.slots.is_empty()
+                    };
+                    if stuck {
+                        let _ = proxy.send_event(AppUserEvent::HideScreenshotOverlay);
+                    }
+                }
+                AppUserEvent::CheckScreenshotFocusLost(seq) => {
+                    let should_check = {
+                        let sess = screenshot_session().lock().unwrap();
+                        sess.capture_seq == seq && sess.revealed
+                    };
+                    if should_check {
+                        let any_focused = unsafe { is_any_nswindow_focused(&screenshot_windows) };
+                        if !any_focused {
+                            let _ = proxy.send_event(AppUserEvent::HideScreenshotOverlay);
                         }
                     }
                 }
@@ -887,6 +960,7 @@ fn main() {
                         sess.revealed = false;
                         sess.active_slot = None;
                         sess.capturing = false;
+                        sess.slots.clear();
                         std::mem::replace(&mut sess.prev_frontmost_pid, 0)
                     };
                     for win in &screenshot_windows {
@@ -916,28 +990,41 @@ fn main() {
                     }
                 }
                 AppUserEvent::HideAllOverlays => {
-                    let prev_pid = {
+                    let (prev_pid, was_screenshot_active) = {
                         let mut sess = screenshot_session().lock().unwrap();
+                        let active = sess.revealed || sess.capturing || !sess.slots.is_empty();
                         sess.revealed = false;
                         sess.active_slot = None;
                         sess.capturing = false;
-                        std::mem::replace(&mut sess.prev_frontmost_pid, 0)
+                        sess.slots.clear();
+                        (std::mem::replace(&mut sess.prev_frontmost_pid, 0), active)
                     };
-                    mini_window.set_visible(false);
-                    clip_window.set_visible(false);
-                    alttab_window.set_visible(false);
+                    let had_visible_overlay = was_screenshot_active
+                        || mini_window.is_visible()
+                        || clip_window.is_visible()
+                        || alttab_window.is_visible()
+                        || screenshot_windows.iter().any(|w| w.is_visible());
+                    unsafe {
+                        hide_floating_overlay_window(&mini_window);
+                        hide_floating_overlay_window(&clip_window);
+                        hide_floating_overlay_window(&alttab_window);
+                    }
                     for win in &screenshot_windows {
                         unsafe {
                             park_overlay_window_offscreen(win);
                         }
                     }
-                    for wv in &screenshot_webviews {
-                        let _ = wv.evaluate_script(
-                            "window.__prepareScreenshotHide && window.__prepareScreenshotHide();",
-                        );
-                    }
-                    unsafe {
-                        restore_previous_frontmost_app(&main_window, prev_pid);
+                    if had_visible_overlay {
+                        for wv in &screenshot_webviews {
+                            let _ = wv.evaluate_script(
+                                "window.__prepareScreenshotHide && window.__prepareScreenshotHide();",
+                            );
+                        }
+                        if prev_pid > 0 {
+                            unsafe {
+                                restore_previous_frontmost_app(&main_window, prev_pid);
+                            }
+                        }
                     }
                     core_input::set_overlay_escape_hotkey_active(false);
                 }
@@ -948,27 +1035,34 @@ fn main() {
                 ..
             } => {
                 if window_id == clip_id {
-                    clip_window.set_visible(false);
+                    unsafe {
+                        hide_floating_overlay_window(&clip_window);
+                    }
                     if !alttab_window.is_visible()
                         && !screenshot_windows.iter().any(|w| w.is_visible())
                     {
                         core_input::set_overlay_escape_hotkey_active(false);
                     }
                 } else if window_id == alttab_id {
-                    alttab_window.set_visible(false);
+                    unsafe {
+                        hide_floating_overlay_window(&alttab_window);
+                    }
                     if !clip_window.is_visible()
                         && !screenshot_windows.iter().any(|w| w.is_visible())
                     {
                         core_input::set_overlay_escape_hotkey_active(false);
                     }
                 } else if window_id == mini_id {
-                    mini_window.set_visible(false);
+                    unsafe {
+                        hide_floating_overlay_window(&mini_window);
+                    }
                 } else if screenshot_ids.contains(&window_id) {
                     let prev_pid = {
                         let mut sess = screenshot_session().lock().unwrap();
                         sess.revealed = false;
                         sess.active_slot = None;
                         sess.capturing = false;
+                        sess.slots.clear();
                         std::mem::replace(&mut sess.prev_frontmost_pid, 0)
                     };
                     for win in &screenshot_windows {
@@ -1016,7 +1110,44 @@ fn main() {
                 ..
             } => {
                 if window_id == mini_id && mini_window.is_visible() {
-                    mini_window.set_visible(false);
+                    unsafe {
+                        hide_floating_overlay_window(&mini_window);
+                    }
+                } else if window_id == clip_id && clip_window.is_visible() {
+                    unsafe {
+                        hide_floating_overlay_window(&clip_window);
+                    }
+                    if !alttab_window.is_visible()
+                        && !screenshot_windows.iter().any(|w| w.is_visible())
+                    {
+                        core_input::set_overlay_escape_hotkey_active(false);
+                    }
+                } else if window_id == alttab_id && alttab_window.is_visible() {
+                    unsafe {
+                        hide_floating_overlay_window(&alttab_window);
+                    }
+                    if !clip_window.is_visible()
+                        && !screenshot_windows.iter().any(|w| w.is_visible())
+                    {
+                        core_input::set_overlay_escape_hotkey_active(false);
+                    }
+                } else if screenshot_ids.contains(&window_id) {
+                    let active_seq = {
+                        let sess = screenshot_session().lock().unwrap();
+                        if sess.revealed {
+                            Some(sess.capture_seq)
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(seq) = active_seq {
+                        let focus_proxy = proxy.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_millis(150));
+                            let _ = focus_proxy
+                                .send_event(AppUserEvent::CheckScreenshotFocusLost(seq));
+                        });
+                    }
                 }
             }
             _ => {}

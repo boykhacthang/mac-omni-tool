@@ -120,7 +120,10 @@ pub unsafe fn show_native_macos_about_panel() {
             msg_set_obj(dict, sel_set, v_name, k_name);
 
             let k_ver = make_nsstring("ApplicationVersion");
-            let v_ver = make_nsstring("2.0.0 — Free Community Edition");
+            let v_ver = make_nsstring(concat!(
+                env!("CARGO_PKG_VERSION"),
+                " — Free Community Edition"
+            ));
             msg_set_obj(dict, sel_set, v_ver, k_ver);
 
             let k_build = make_nsstring("Version");

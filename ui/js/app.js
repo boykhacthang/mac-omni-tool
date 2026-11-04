@@ -91,7 +91,7 @@ function showAboutModalDialog() {
     existing.remove();
   }
 
-  const curVer = (cachedUpdateState && cachedUpdateState.current_version) || "2.0.0";
+  const curVer = (cachedUpdateState && cachedUpdateState.current_version) || "2.1.0";
   const backdrop = document.createElement("div");
   backdrop.id = "about-modal-backdrop";
   backdrop.className = "about-modal-backdrop";

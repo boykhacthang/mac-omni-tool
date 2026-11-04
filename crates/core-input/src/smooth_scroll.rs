@@ -38,7 +38,7 @@ static SCROLL_ENGINE: OnceLock<(Mutex<SmoothScrollState>, Condvar)> = OnceLock::
 /// Immediately clear any in-flight smooth scroll momentum when Smooth Scroll or External Mouse is turned off.
 pub fn stop_smooth_scroll_momentum() {
     if let Some((lock, _)) = SCROLL_ENGINE.get() {
-        if let Ok(mut st) = lock.lock() {
+        if let Ok(mut st) = lock.try_lock() {
             st.remaining_y = 0.0;
             st.remaining_x = 0.0;
             st.subpixel_y = 0.0;

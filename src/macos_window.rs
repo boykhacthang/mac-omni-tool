@@ -227,9 +227,9 @@ pub unsafe fn set_nswindow_rounded_transparent(window: &tao::window::Window, cor
     objc_autoreleasePoolPop(pool);
 }
 
-/// Safely hide an overlay window, zero its opacity, lower its level, and make it ignore all mouse events
-/// so a hidden overlay window can NEVER intercept clicks, flash stale frames, or freeze the screen,
-/// while keeping its Retina backing scale factor intact.
+/// Safely hide an overlay window, zero its opacity, lower its level, move its frame offscreen (`1x1` at `-30000,-30000`),
+/// and make it ignore all mouse events so a hidden overlay window can NEVER intercept clicks, flash stale frames,
+/// or freeze the screen on any Space.
 pub unsafe fn park_overlay_window_offscreen(window: &tao::window::Window) {
     let pool = objc_autoreleasePoolPush();
     let ns_win = window.ns_window();
@@ -238,11 +238,14 @@ pub unsafe fn park_overlay_window_offscreen(window: &tao::window::Window) {
         type Msg1Isize = unsafe extern "C" fn(*mut c_void, *mut c_void, isize);
         type Msg1F64 = unsafe extern "C" fn(*mut c_void, *mut c_void, f64);
         type Msg1Ptr = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
+        type MsgSetFrame =
+            unsafe extern "C" fn(*mut c_void, *mut c_void, CocoaRect, bool, bool);
 
         let msg1_bool: Msg1Bool = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_isize: Msg1Isize = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_f64: Msg1F64 = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_ptr: Msg1Ptr = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg_set_frame: MsgSetFrame = std::mem::transmute(objc_msgSend as *const c_void);
 
         msg1_isize(
             ns_win,
@@ -262,6 +265,23 @@ pub unsafe fn park_overlay_window_offscreen(window: &tao::window::Window) {
         msg1_f64(ns_win, sel_registerName(c"setAlphaValue:".as_ptr()), 0.0);
         // NSNormalWindowLevel = 0
         msg1_isize(ns_win, sel_registerName(c"setLevel:".as_ptr()), 0);
+        let offscreen_rect = CocoaRect {
+            origin: CocoaPoint {
+                x: -30000.0,
+                y: -30000.0,
+            },
+            size: CocoaSize {
+                width: 1.0,
+                height: 1.0,
+            },
+        };
+        msg_set_frame(
+            ns_win,
+            sel_registerName(c"setFrame:display:animate:".as_ptr()),
+            offscreen_rect,
+            false,
+            false,
+        );
         msg1_ptr(
             ns_win,
             sel_registerName(c"orderOut:".as_ptr()),
@@ -270,6 +290,79 @@ pub unsafe fn park_overlay_window_offscreen(window: &tao::window::Window) {
     }
     objc_autoreleasePoolPop(pool);
     window.set_visible(false);
+}
+
+/// Safely hide a floating popup/drawer window (`mini_window`, `clip_window`, `alttab_window`)
+/// and make it ignore all mouse events so it can never block clicks while hidden.
+pub unsafe fn hide_floating_overlay_window(window: &tao::window::Window) {
+    let pool = objc_autoreleasePoolPush();
+    let ns_win = window.ns_window();
+    if !ns_win.is_null() {
+        type Msg1Bool = unsafe extern "C" fn(*mut c_void, *mut c_void, bool);
+        type Msg1F64 = unsafe extern "C" fn(*mut c_void, *mut c_void, f64);
+        type Msg1Ptr = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
+
+        let msg1_bool: Msg1Bool = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_f64: Msg1F64 = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_ptr: Msg1Ptr = std::mem::transmute(objc_msgSend as *const c_void);
+
+        msg1_bool(
+            ns_win,
+            sel_registerName(c"setIgnoresMouseEvents:".as_ptr()),
+            true,
+        );
+        msg1_f64(ns_win, sel_registerName(c"setAlphaValue:".as_ptr()), 0.0);
+        msg1_ptr(
+            ns_win,
+            sel_registerName(c"orderOut:".as_ptr()),
+            std::ptr::null_mut(),
+        );
+    }
+    objc_autoreleasePoolPop(pool);
+    window.set_visible(false);
+}
+
+/// Show a floating popup/drawer window (`mini_window`, `clip_window`, `alttab_window`)
+/// and restore its opacity and mouse event handling.
+pub unsafe fn show_floating_overlay_window(window: &tao::window::Window, corner_radius: f64) {
+    set_nswindow_rounded_transparent(window, corner_radius);
+    let pool = objc_autoreleasePoolPush();
+    let ns_win = window.ns_window();
+    if !ns_win.is_null() {
+        type Msg1Bool = unsafe extern "C" fn(*mut c_void, *mut c_void, bool);
+        type Msg1F64 = unsafe extern "C" fn(*mut c_void, *mut c_void, f64);
+
+        let msg1_bool: Msg1Bool = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_f64: Msg1F64 = std::mem::transmute(objc_msgSend as *const c_void);
+
+        msg1_bool(
+            ns_win,
+            sel_registerName(c"setIgnoresMouseEvents:".as_ptr()),
+            false,
+        );
+        msg1_f64(ns_win, sel_registerName(c"setAlphaValue:".as_ptr()), 1.0);
+    }
+    objc_autoreleasePoolPop(pool);
+    window.set_visible(true);
+    window.set_focus();
+}
+
+/// Check if any of the given `tao::window::Window`s is currently the active key window (`[ns_win isKeyWindow]`).
+pub unsafe fn is_any_nswindow_focused(windows: &[tao::window::Window]) -> bool {
+    let pool = objc_autoreleasePoolPush();
+    type MsgBool = unsafe extern "C" fn(*mut c_void, *mut c_void) -> bool;
+    let msg_bool: MsgBool = std::mem::transmute(objc_msgSend as *const c_void);
+    let sel_is_key = sel_registerName(c"isKeyWindow".as_ptr());
+    let mut any_key = false;
+    for w in windows {
+        let ns_win = w.ns_window();
+        if !ns_win.is_null() && msg_bool(ns_win, sel_is_key) {
+            any_key = true;
+            break;
+        }
+    }
+    objc_autoreleasePoolPop(pool);
+    any_key
 }
 
 /// Position a borderless fullscreen overlay `NSWindow` directly onto the target display's exact
@@ -391,11 +484,17 @@ pub unsafe fn prepare_screenshot_window_hidden(
             sel_registerName(c"setIgnoresMouseEvents:".as_ptr()),
             true,
         );
+        // NSWindowCollectionBehaviorMoveToActiveSpace (1 << 1) | NSWindowCollectionBehaviorTransient (1 << 3) = 10
+        msg1_isize(
+            ns_win,
+            sel_registerName(c"setCollectionBehavior:".as_ptr()),
+            10,
+        );
         // 0.004 < 1/255 is completely invisible on screen, while keeping WindowServer occlusion
         // state visible so WKWebView renders requestAnimationFrame + CAMetalLayer immediately.
         msg1_f64(ns_win, sel_registerName(c"setAlphaValue:".as_ptr()), 0.004);
-        // NSStatusWindowLevel = 25 (above Menu Bar & Dock)
-        msg1_isize(ns_win, sel_registerName(c"setLevel:".as_ptr()), 25);
+        // Keep NSNormalWindowLevel = 0 until reveal_screenshot_window is called
+        msg1_isize(ns_win, sel_registerName(c"setLevel:".as_ptr()), 0);
 
         place_overlay_on_display(window, disp_x, disp_y, disp_w, disp_h);
         let _ = msg0(ns_win, sel_registerName(c"orderFrontRegardless".as_ptr()));
@@ -405,6 +504,7 @@ pub unsafe fn prepare_screenshot_window_hidden(
 
 /// Atomically reveal an already-positioned and GPU-composited screenshot overlay window (`alpha = 1.0`).
 pub unsafe fn reveal_screenshot_window(window: &tao::window::Window, make_key: bool) {
+    window.set_visible(true);
     let pool = objc_autoreleasePoolPush();
     type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
     type Msg1Bool = unsafe extern "C" fn(*mut c_void, *mut c_void, bool);
@@ -424,6 +524,11 @@ pub unsafe fn reveal_screenshot_window(window: &tao::window::Window, make_key: b
             ns_win,
             sel_registerName(c"setAnimationBehavior:".as_ptr()),
             2,
+        );
+        msg1_isize(
+            ns_win,
+            sel_registerName(c"setCollectionBehavior:".as_ptr()),
+            10,
         );
         msg1_isize(ns_win, sel_registerName(c"setLevel:".as_ptr()), 25);
         msg1_bool(

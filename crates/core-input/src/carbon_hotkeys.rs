@@ -109,6 +109,10 @@ pub fn sync_feature_carbon_hotkeys() {
             !cfg.dashboard_shortcut.trim().is_empty(),
             &cfg.dashboard_shortcut,
         );
+
+        // Permanent Emergency Unfreeze Hotkeys (Option+Esc = 98, Ctrl+Esc = 97) always active at OS Carbon level
+        register_if_active(98, true, "Option+Escape");
+        register_if_active(97, true, "Ctrl+Escape");
     }
 }
 
@@ -213,6 +217,9 @@ pub fn set_overlay_escape_hotkey_active(active: bool) {
             }
         }
     }
+    if let Ok(cfg) = crate::config::config_mutex().try_lock() {
+        crate::event_tap::sync_event_tap_enabled(cfg.needs_event_tap());
+    }
 }
 
 unsafe extern "C" fn carbon_hotkey_handler(
@@ -281,7 +288,8 @@ unsafe extern "C" fn carbon_hotkey_handler(
                     notify_overlay(UiOverlayEvent::ToggleMainDashboard);
                 }
             }
-            99 => {
+            97..=99 => {
+                crate::event_tap::reset_all_tap_held_states();
                 notify_overlay_immediate(UiOverlayEvent::HideAllOverlays);
             }
             id if (100..150).contains(&id) => {

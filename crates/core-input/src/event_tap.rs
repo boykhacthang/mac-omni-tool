@@ -3,7 +3,6 @@
 
 use crate::actions::{
     is_finder_frontmost, notify_overlay, notify_overlay_immediate, now_ms, trigger_system_action,
-    OVERLAY_CALLBACK,
 };
 use crate::carbon_hotkeys::{trigger_window_snap_debounced, OVERLAY_ESCAPE_ACTIVE};
 use crate::config::{
@@ -13,8 +12,10 @@ use crate::config::{
 use crate::ffi::*;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 static TAP_RUNNING: AtomicBool = AtomicBool::new(false);
+static STATE_CACHE_RUNNING: AtomicBool = AtomicBool::new(false);
 static ALTTAB_MODIFIER_HELD: AtomicBool = AtomicBool::new(false);
 
 static LEFT_DOWN_AT_MS: AtomicI64 = AtomicI64::new(0);
@@ -25,14 +26,90 @@ static SUPPRESS_RIGHT_UP: AtomicBool = AtomicBool::new(false);
 static SUPPRESSED_OTHER_BTN_MASK: AtomicI64 = AtomicI64::new(0);
 static ACTIVE_TAP_PORT: AtomicI64 = AtomicI64::new(0);
 
+// Lock-free & non-blocking cached system state updated off the HID thread every 200ms
+// so `event_tap_callback` never calls Objective-C `NSWorkspace` or WindowServer IPC synchronously.
+static CACHED_FRONTMOST_IS_FINDER: AtomicBool = AtomicBool::new(false);
+static CACHED_TOTAL_SPACES: AtomicI64 = AtomicI64::new(2);
+static CACHED_FRONTMOST_BUNDLE: OnceLock<Mutex<String>> = OnceLock::new();
+static CACHED_WINDOW_SHORTCUTS: OnceLock<Mutex<Vec<core_window::WindowShortcutBinding>>> =
+    OnceLock::new();
+
+fn cached_frontmost_bundle() -> String {
+    CACHED_FRONTMOST_BUNDLE
+        .get_or_init(|| Mutex::new(String::new()))
+        .try_lock()
+        .map(|g| g.clone())
+        .unwrap_or_default()
+}
+
+fn cached_window_shortcuts() -> Vec<core_window::WindowShortcutBinding> {
+    CACHED_WINDOW_SHORTCUTS
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .try_lock()
+        .map(|g| g.clone())
+        .unwrap_or_default()
+}
+
+pub(crate) fn reset_all_tap_held_states() {
+    ALTTAB_MODIFIER_HELD.store(false, Ordering::SeqCst);
+    LEFT_IS_HELD.store(false, Ordering::Relaxed);
+    RIGHT_IS_HELD.store(false, Ordering::Relaxed);
+    SUPPRESS_RIGHT_UP.store(false, Ordering::Relaxed);
+    SUPPRESSED_OTHER_BTN_MASK.store(0, Ordering::Relaxed);
+    crate::smooth_scroll::stop_smooth_scroll_momentum();
+}
+
+fn start_background_state_cache() {
+    if STATE_CACHE_RUNNING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let _ = std::thread::Builder::new()
+        .name("omni-input-state-cache".to_string())
+        .spawn(|| {
+            let mut last_space_index: usize = 0;
+            loop {
+                let (bundle_id, _) = crate::spaces::frontmost_app_info();
+                let is_finder = bundle_id == "com.apple.finder" || is_finder_frontmost();
+                CACHED_FRONTMOST_IS_FINDER.store(is_finder, Ordering::Relaxed);
+                if let Ok(mut guard) = CACHED_FRONTMOST_BUNDLE
+                    .get_or_init(|| Mutex::new(String::new()))
+                    .try_lock()
+                {
+                    *guard = bundle_id;
+                }
+
+                let (total_spaces, _, cur_space) = crate::spaces::query_macos_spaces_counts();
+                CACHED_TOTAL_SPACES.store(total_spaces.max(1) as i64, Ordering::Relaxed);
+
+                // If user switched macOS Desktop Space (e.g. via physical F3 Mission Control or trackpad swipe)
+                // while an overlay was active, immediately dismiss all overlays so no window is left stranded.
+                if last_space_index != 0 && cur_space != 0 && cur_space != last_space_index {
+                    if OVERLAY_ESCAPE_ACTIVE.load(Ordering::SeqCst) {
+                        reset_all_tap_held_states();
+                        notify_overlay_immediate(UiOverlayEvent::HideAllOverlays);
+                    }
+                }
+                if cur_space != 0 {
+                    last_space_index = cur_space;
+                }
+
+                let shortcuts = core_window::get_window_shortcuts();
+                if let Ok(mut guard) = CACHED_WINDOW_SHORTCUTS
+                    .get_or_init(|| Mutex::new(Vec::new()))
+                    .try_lock()
+                {
+                    *guard = shortcuts;
+                }
+
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+        });
+}
+
 /// Dynamically enable or disable the macOS `CGEventTap` port based on whether any tap-dependent feature is active.
 pub fn sync_event_tap_enabled(enabled: bool) {
     if !enabled {
-        ALTTAB_MODIFIER_HELD.store(false, Ordering::SeqCst);
-        LEFT_IS_HELD.store(false, Ordering::Relaxed);
-        RIGHT_IS_HELD.store(false, Ordering::Relaxed);
-        SUPPRESS_RIGHT_UP.store(false, Ordering::Relaxed);
-        SUPPRESSED_OTHER_BTN_MASK.store(0, Ordering::Relaxed);
+        reset_all_tap_held_states();
     }
     let port = ACTIVE_TAP_PORT.load(Ordering::Relaxed) as CFMachPortRef;
     if !port.is_null() {
@@ -50,9 +127,13 @@ unsafe extern "C" fn event_tap_callback(
     _user_info: *mut c_void,
 ) -> CGEventRef {
     if event_type == K_CG_EVENT_TAP_DISABLED_BY_TIMEOUT {
+        reset_all_tap_held_states();
         let port = ACTIVE_TAP_PORT.load(Ordering::Relaxed) as CFMachPortRef;
         if !port.is_null() {
-            let should_enable = crate::config::get_input_config().needs_event_tap()
+            let should_enable = config_mutex()
+                .try_lock()
+                .map(|g| g.needs_event_tap())
+                .unwrap_or(true)
                 || OVERLAY_ESCAPE_ACTIVE.load(Ordering::SeqCst);
             CGEventTapEnable(port, should_enable);
         }
@@ -66,6 +147,29 @@ unsafe extern "C" fn event_tap_callback(
     // Ignore synthetic events generated by Mac Omni Tool itself (Smooth Scroll & Synthetic Key Combos)
     if CGEventGetIntegerValueField(event, K_CG_EVENT_SOURCE_USER_DATA) == OMNI_SYNTHETIC_EVENT_TAG {
         return event;
+    }
+
+    // Unconditional, lock-free Global Emergency Escape Kill-Switch (runs BEFORE any mutex lock!)
+    if event_type == K_CG_EVENT_KEY_DOWN {
+        let keycode = CGEventGetIntegerValueField(event, K_CG_KEYBOARD_EVENT_KEYCODE);
+        if keycode == 53 {
+            let flags = CGEventGetFlags(event);
+            reset_all_tap_held_states();
+            let was_overlay_active = OVERLAY_ESCAPE_ACTIVE.swap(false, Ordering::SeqCst);
+            let has_emergency_mod = (flags & (FLAG_OPTION | FLAG_CONTROL | FLAG_COMMAND)) != 0;
+            notify_overlay_immediate(UiOverlayEvent::HideAllOverlays);
+            if was_overlay_active || has_emergency_mod {
+                return std::ptr::null_mut();
+            }
+            return event;
+        }
+        // Physical F3 / Mission Control keycodes (99 = F3, 160 = Mission Control): always dismiss overlays first
+        if keycode == 99 || keycode == 160 {
+            if OVERLAY_ESCAPE_ACTIVE.swap(false, Ordering::SeqCst) {
+                reset_all_tap_held_states();
+                notify_overlay_immediate(UiOverlayEvent::HideAllOverlays);
+            }
+        }
     }
 
     // Never block the HID event tap thread on a mutex; pass events through immediately if busy
@@ -129,7 +233,10 @@ unsafe extern "C" fn event_tap_callback(
         K_CG_EVENT_RIGHT_MOUSE_UP => {
             RIGHT_IS_HELD.store(false, Ordering::Relaxed);
             if SUPPRESS_RIGHT_UP.swap(false, Ordering::Relaxed) {
-                return std::ptr::null_mut();
+                let dt = (now_ms() - RIGHT_DOWN_AT_MS.load(Ordering::Relaxed)).abs();
+                if dt <= 600 {
+                    return std::ptr::null_mut();
+                }
             }
         }
         K_CG_EVENT_SCROLL_WHEEL => {
@@ -143,7 +250,7 @@ unsafe extern "C" fn event_tap_callback(
                     .iter()
                     .any(|p| p.enabled && p.smooth_scroll_mode != "inherit");
                 let front_bundle = if needs_bundle_check {
-                    crate::spaces::frontmost_app_info().0
+                    cached_frontmost_bundle()
                 } else {
                     String::new()
                 };
@@ -160,7 +267,7 @@ unsafe extern "C" fn event_tap_callback(
                 }
 
                 if (2..=4).contains(&btn) {
-                    let (bundle_id, _) = crate::spaces::frontmost_app_info();
+                    let bundle_id = cached_frontmost_bundle();
                     let action = cfg.resolve_mouse_button_action(&bundle_id, btn);
 
                     match action {
@@ -170,7 +277,7 @@ unsafe extern "C" fn event_tap_callback(
                             return std::ptr::null_mut();
                         }
                         "space_left" | "space_right" => {
-                            let (total_spaces, _, _) = crate::spaces::query_macos_spaces_counts();
+                            let total_spaces = CACHED_TOTAL_SPACES.load(Ordering::Relaxed);
                             if total_spaces <= 1 {
                                 match cfg.single_space_fallback.as_str() {
                                     "passthrough" => return event,
@@ -215,16 +322,13 @@ unsafe extern "C" fn event_tap_callback(
             let keycode = CGEventGetIntegerValueField(event, K_CG_KEYBOARD_EVENT_KEYCODE);
             let flags = CGEventGetFlags(event);
 
-            // Global OS-level Escape emergency hatch when any overlay is active
-            if keycode == 53 && OVERLAY_ESCAPE_ACTIVE.load(Ordering::SeqCst) {
-                notify_overlay_immediate(UiOverlayEvent::HideAllOverlays);
-                return std::ptr::null_mut();
-            }
-
             // Feature 5: Finder Cut & Paste (Cmd+X -> Cmd+C with cut flag, Cmd+V -> Cmd+Option+V)
             let only_cmd = (flags & FLAG_COMMAND) != 0
                 && (flags & (FLAG_SHIFT | FLAG_OPTION | FLAG_CONTROL)) == 0;
-            if cfg.finder_cut_paste_enabled && only_cmd && is_finder_frontmost() {
+            if cfg.finder_cut_paste_enabled
+                && only_cmd
+                && CACHED_FRONTMOST_IS_FINDER.load(Ordering::Relaxed)
+            {
                 if keycode == 7 {
                     FINDER_CUT_PENDING.store(true, Ordering::SeqCst);
                     CGEventSetIntegerValueField(event, K_CG_KEYBOARD_EVENT_KEYCODE, 8);
@@ -295,7 +399,7 @@ unsafe extern "C" fn event_tap_callback(
                 }
 
                 if cfg.window_snapping_enabled {
-                    let bindings = core_window::get_window_shortcuts();
+                    let bindings = cached_window_shortcuts();
                     for b in bindings {
                         if b.enabled && shortcuts_match(&combo, &b.shortcut) {
                             trigger_window_snap_debounced(&b.action);
@@ -314,13 +418,7 @@ unsafe extern "C" fn event_tap_callback(
                 let flags = CGEventGetFlags(event);
                 if (flags & (FLAG_OPTION | FLAG_COMMAND)) == 0 {
                     ALTTAB_MODIFIER_HELD.store(false, Ordering::SeqCst);
-                    if let Some(lock) = OVERLAY_CALLBACK.get() {
-                        if let Ok(guard) = lock.lock() {
-                            if let Some(cb) = guard.as_ref() {
-                                cb(UiOverlayEvent::CommitAltTabSelection);
-                            }
-                        }
-                    }
+                    notify_overlay_immediate(UiOverlayEvent::CommitAltTabSelection);
                 }
             }
         }
@@ -332,6 +430,7 @@ unsafe extern "C" fn event_tap_callback(
 
 /// Start the global `CGEventTap` listener thread for `Cmd+Tab` replacement, Finder Cut/Paste, Mouse Chords, and Global Shortcuts.
 pub fn start_global_input_tap() {
+    start_background_state_cache();
     if TAP_RUNNING.swap(true, Ordering::SeqCst) {
         return;
     }

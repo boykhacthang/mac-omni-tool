@@ -53,7 +53,7 @@ EOF
 echo "✅ Đã tạo xong releases/latest.json (SHA256: ${SHA256_ZIP})"
 
 # 5. Commit, tạo Git Tag và đẩy lên GitHub
-git add Cargo.toml Cargo.lock bundle_app.sh releases/
+git add -A
 git commit -m "release(v${VERSION}): ${NOTES_VI}" || true
 git tag -f -a "v${VERSION}" -m "Mac Omni Tool v${VERSION} — ${NOTES_VI}"
 git push origin main

@@ -71,6 +71,8 @@ pub enum AppUserEvent {
         slot: usize,
         seq: u64,
     },
+    ScreenshotRevealWatchdog(u64),
+    CheckScreenshotFocusLost(u64),
     ScreenshotCaptureFailed,
     FullscreenInstantCopied {
         display_name: String,

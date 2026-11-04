@@ -469,7 +469,7 @@ async function renderUnifiedSettingsScreen(view) {
         <div class="card-header" style="flex-wrap:wrap;gap:10px;margin-bottom:6px;">
           <div class="card-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <span>💡 ${t("settings.about_community_title")}</span>
-            <span class="badge-ok">v2.0.0 • MIT License</span>
+            <span class="badge-ok">v2.1.0 • MIT License</span>
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <button class="btn btn-sm btn-primary" id="btn-check-update-settings">

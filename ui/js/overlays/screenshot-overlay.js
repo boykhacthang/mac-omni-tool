@@ -836,11 +836,13 @@ function initScreenshotOverlay() {
   };
 
   window.addEventListener("keydown", (e) => {
-    if (textEditor.style.display === "block") return;
     if (e.key === "Escape") {
       e.preventDefault();
       cancelScreenshot();
-    } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c") {
+      return;
+    }
+    if (textEditor.style.display === "block") return;
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c") {
       e.preventDefault();
       copySelectionToClipboard();
     } else if (e.key === "Enter" && sel && sel.w >= 6 && sel.h >= 6) {
@@ -989,7 +991,7 @@ function initScreenshotOverlay() {
 
     if (isFull) {
       sel = { x: 0, y: 0, w: targetW, h: targetH };
-      hintEl.style.display = "none";
+      hintEl.style.display = "inline-flex";
     } else {
       hintEl.style.display = "inline-flex";
       vertBar.style.display = "none";
@@ -1027,7 +1029,7 @@ function initScreenshotOverlay() {
       }
     };
     nextImg.onerror = () => {
-      api("reveal_screenshot_slot", { slot: targetSlot, seq: targetSeq });
+      cancelScreenshot();
     };
     nextImg.src = imgUrl;
   };

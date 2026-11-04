@@ -1,10 +1,9 @@
 {
-  "version": "2.0.0",
-  "tag": "v2.0.0",
+  "version": "2.1.0",
   "published_at": "2026-11-04",
-  "zip_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.0.0/MacOmniTool-v2.0.0-macOS.zip",
-  "dmg_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.0.0/MacOmniTool-v2.0.0-Installer.dmg",
-  "release_page_url": "https://github.com/boykhacthang/mac-omni-tool/releases/tag/v2.0.0",
-  "sha256_zip": "057e233b0834257e82ca45989b3e33b63d9a513331a856162b22f1f1a8c0001e",
-  "notes": "Mac Omni Tool v2.0.0 — Built-in 1-Click Auto-Updater, Modular 6-Crate Workspace, 120Hz Smooth Mouse Scroll, 3-Mode Multi-Monitor Screenshot, Unified Sub-Tabs & Center 75% Full-Height Window."
+  "zip_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.1.0/MacOmniTool-v2.1.0-macOS.zip",
+  "dmg_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.1.0/MacOmniTool-v2.1.0-Installer.dmg",
+  "sha256_zip": "4e1b47b61303b460ad0208796a2db5cbf936d95688ec4ddb98605a97bda8dd86",
+  "notes_en": "Added Menu Bar customization & background mode, eliminated overlay screen freeze, and added global Esc / Option+Esc emergency unfreeze hotkey",
+  "notes_vi": "Th\u00eam tu\u1ef3 ch\u1ec9nh Menu Bar & ch\u1ebf \u0111\u1ed9 ch\u1ea1y ng\u1ea7m, kh\u1eafc ph\u1ee5c tri\u1ec7t \u0111\u1ec3 l\u1ed7i \u0111\u01a1 m\u00e0n h\u00ecnh v\u00e0 b\u1ed5 sung ph\u00edm t\u1eaft kh\u1ea9n c\u1ea5p Esc / Option+Esc"
 }
