@@ -25,6 +25,24 @@ static SUPPRESS_RIGHT_UP: AtomicBool = AtomicBool::new(false);
 static SUPPRESSED_OTHER_BTN_MASK: AtomicI64 = AtomicI64::new(0);
 static ACTIVE_TAP_PORT: AtomicI64 = AtomicI64::new(0);
 
+/// Dynamically enable or disable the macOS `CGEventTap` port based on whether any tap-dependent feature is active.
+pub fn sync_event_tap_enabled(enabled: bool) {
+    if !enabled {
+        ALTTAB_MODIFIER_HELD.store(false, Ordering::SeqCst);
+        LEFT_IS_HELD.store(false, Ordering::Relaxed);
+        RIGHT_IS_HELD.store(false, Ordering::Relaxed);
+        SUPPRESS_RIGHT_UP.store(false, Ordering::Relaxed);
+        SUPPRESSED_OTHER_BTN_MASK.store(0, Ordering::Relaxed);
+    }
+    let port = ACTIVE_TAP_PORT.load(Ordering::Relaxed) as CFMachPortRef;
+    if !port.is_null() {
+        let active = enabled || OVERLAY_ESCAPE_ACTIVE.load(Ordering::SeqCst);
+        unsafe {
+            CGEventTapEnable(port, active);
+        }
+    }
+}
+
 unsafe extern "C" fn event_tap_callback(
     _proxy: CGEventTapProxy,
     event_type: u32,
@@ -34,7 +52,9 @@ unsafe extern "C" fn event_tap_callback(
     if event_type == K_CG_EVENT_TAP_DISABLED_BY_TIMEOUT {
         let port = ACTIVE_TAP_PORT.load(Ordering::Relaxed) as CFMachPortRef;
         if !port.is_null() {
-            CGEventTapEnable(port, true);
+            let should_enable = crate::config::get_input_config().needs_event_tap()
+                || OVERLAY_ESCAPE_ACTIVE.load(Ordering::SeqCst);
+            CGEventTapEnable(port, should_enable);
         }
         return event;
     }
@@ -54,8 +74,16 @@ unsafe extern "C" fn event_tap_callback(
         Err(_) => return event,
     };
 
+    if !cfg.needs_event_tap() && !OVERLAY_ESCAPE_ACTIVE.load(Ordering::SeqCst) {
+        return event;
+    }
+
     match event_type {
         K_CG_EVENT_LEFT_MOUSE_DOWN => {
+            if !cfg.external_mouse_enabled || !cfg.mouse_chord_enabled {
+                LEFT_IS_HELD.store(false, Ordering::Relaxed);
+                return event;
+            }
             let t = now_ms();
             LEFT_DOWN_AT_MS.store(t, Ordering::Relaxed);
             LEFT_IS_HELD.store(true, Ordering::Relaxed);
@@ -64,7 +92,7 @@ unsafe extern "C" fn event_tap_callback(
                 let dt = (t - RIGHT_DOWN_AT_MS.load(Ordering::Relaxed)).abs();
                 if dt > 500 {
                     RIGHT_IS_HELD.store(false, Ordering::Relaxed);
-                } else if cfg.mouse_chord_enabled && dt <= cfg.mouse_chord_threshold_ms {
+                } else if dt <= cfg.mouse_chord_threshold_ms {
                     LEFT_IS_HELD.store(false, Ordering::Relaxed);
                     RIGHT_IS_HELD.store(false, Ordering::Relaxed);
                     SUPPRESS_RIGHT_UP.store(true, Ordering::Relaxed);
@@ -77,6 +105,10 @@ unsafe extern "C" fn event_tap_callback(
             LEFT_IS_HELD.store(false, Ordering::Relaxed);
         }
         K_CG_EVENT_RIGHT_MOUSE_DOWN => {
+            if !cfg.external_mouse_enabled || !cfg.mouse_chord_enabled {
+                RIGHT_IS_HELD.store(false, Ordering::Relaxed);
+                return event;
+            }
             let t = now_ms();
             RIGHT_DOWN_AT_MS.store(t, Ordering::Relaxed);
             RIGHT_IS_HELD.store(true, Ordering::Relaxed);
@@ -85,7 +117,7 @@ unsafe extern "C" fn event_tap_callback(
                 let dt = (t - LEFT_DOWN_AT_MS.load(Ordering::Relaxed)).abs();
                 if dt > 500 {
                     LEFT_IS_HELD.store(false, Ordering::Relaxed);
-                } else if cfg.mouse_chord_enabled && dt <= cfg.mouse_chord_threshold_ms.max(250) {
+                } else if dt <= cfg.mouse_chord_threshold_ms.max(250) {
                     LEFT_IS_HELD.store(false, Ordering::Relaxed);
                     RIGHT_IS_HELD.store(false, Ordering::Relaxed);
                     SUPPRESS_RIGHT_UP.store(true, Ordering::Relaxed);
@@ -101,7 +133,11 @@ unsafe extern "C" fn event_tap_callback(
             }
         }
         K_CG_EVENT_SCROLL_WHEEL => {
-            if cfg.external_mouse_enabled {
+            if cfg.external_mouse_enabled
+                && (cfg.smooth_scroll_enabled
+                    || cfg.invert_external_mouse_scroll
+                    || cfg.shift_horizontal_scroll)
+            {
                 let needs_bundle_check = cfg
                     .app_mouse_profiles
                     .iter()
@@ -115,48 +151,52 @@ unsafe extern "C" fn event_tap_callback(
             }
         }
         K_CG_EVENT_OTHER_MOUSE_DOWN => {
-            let btn = CGEventGetIntegerValueField(event, K_CG_MOUSE_EVENT_BUTTON_NUMBER);
-            // CoreGraphics buttonNumber: 2 = Mouse 3 (Middle), 3 = Mouse 4 (Back), 4 = Mouse 5 (Forward)
-            if (2..=8).contains(&btn) {
-                crate::spaces::LAST_MOUSE_BUTTON.store(btn + 1, Ordering::Relaxed);
-                crate::spaces::LAST_MOUSE_BUTTON_AT_MS.store(now_ms(), Ordering::Relaxed);
-            }
+            if cfg.external_mouse_enabled && cfg.mouse_buttons_enabled {
+                let btn = CGEventGetIntegerValueField(event, K_CG_MOUSE_EVENT_BUTTON_NUMBER);
+                // CoreGraphics buttonNumber: 2 = Mouse 3 (Middle), 3 = Mouse 4 (Back), 4 = Mouse 5 (Forward)
+                if (2..=8).contains(&btn) {
+                    crate::spaces::LAST_MOUSE_BUTTON.store(btn + 1, Ordering::Relaxed);
+                    crate::spaces::LAST_MOUSE_BUTTON_AT_MS.store(now_ms(), Ordering::Relaxed);
+                }
 
-            if cfg.external_mouse_enabled && cfg.mouse_buttons_enabled && (2..=4).contains(&btn) {
-                let (bundle_id, _) = crate::spaces::frontmost_app_info();
-                let action = cfg.resolve_mouse_button_action(&bundle_id, btn);
+                if (2..=4).contains(&btn) {
+                    let (bundle_id, _) = crate::spaces::frontmost_app_info();
+                    let action = cfg.resolve_mouse_button_action(&bundle_id, btn);
 
-                match action {
-                    "default" => return event,
-                    "disabled" => {
-                        SUPPRESSED_OTHER_BTN_MASK.fetch_or(1 << btn, Ordering::Relaxed);
-                        return std::ptr::null_mut();
-                    }
-                    "space_left" | "space_right" => {
-                        let (total_spaces, _, _) = crate::spaces::query_macos_spaces_counts();
-                        if total_spaces <= 1 {
-                            match cfg.single_space_fallback.as_str() {
-                                "passthrough" => return event,
-                                "mission_control" => {
-                                    SUPPRESSED_OTHER_BTN_MASK.fetch_or(1 << btn, Ordering::Relaxed);
-                                    trigger_system_action("mission_control");
-                                    return std::ptr::null_mut();
-                                }
-                                _ => {
-                                    SUPPRESSED_OTHER_BTN_MASK.fetch_or(1 << btn, Ordering::Relaxed);
-                                    return std::ptr::null_mut();
-                                }
-                            }
-                        } else {
+                    match action {
+                        "default" => return event,
+                        "disabled" => {
                             SUPPRESSED_OTHER_BTN_MASK.fetch_or(1 << btn, Ordering::Relaxed);
-                            trigger_system_action(action);
                             return std::ptr::null_mut();
                         }
-                    }
-                    other_act => {
-                        SUPPRESSED_OTHER_BTN_MASK.fetch_or(1 << btn, Ordering::Relaxed);
-                        trigger_system_action(other_act);
-                        return std::ptr::null_mut();
+                        "space_left" | "space_right" => {
+                            let (total_spaces, _, _) = crate::spaces::query_macos_spaces_counts();
+                            if total_spaces <= 1 {
+                                match cfg.single_space_fallback.as_str() {
+                                    "passthrough" => return event,
+                                    "mission_control" => {
+                                        SUPPRESSED_OTHER_BTN_MASK
+                                            .fetch_or(1 << btn, Ordering::Relaxed);
+                                        trigger_system_action("mission_control");
+                                        return std::ptr::null_mut();
+                                    }
+                                    _ => {
+                                        SUPPRESSED_OTHER_BTN_MASK
+                                            .fetch_or(1 << btn, Ordering::Relaxed);
+                                        return std::ptr::null_mut();
+                                    }
+                                }
+                            } else {
+                                SUPPRESSED_OTHER_BTN_MASK.fetch_or(1 << btn, Ordering::Relaxed);
+                                trigger_system_action(action);
+                                return std::ptr::null_mut();
+                            }
+                        }
+                        other_act => {
+                            SUPPRESSED_OTHER_BTN_MASK.fetch_or(1 << btn, Ordering::Relaxed);
+                            trigger_system_action(other_act);
+                            return std::ptr::null_mut();
+                        }
                     }
                 }
             }
@@ -259,6 +299,10 @@ unsafe extern "C" fn event_tap_callback(
             }
         }
         K_CG_EVENT_FLAGS_CHANGED => {
+            if !cfg.replace_macos_cmd_tab {
+                ALTTAB_MODIFIER_HELD.store(false, Ordering::SeqCst);
+                return event;
+            }
             if ALTTAB_MODIFIER_HELD.load(Ordering::SeqCst) {
                 let flags = CGEventGetFlags(event);
                 if (flags & (FLAG_OPTION | FLAG_COMMAND)) == 0 {
@@ -285,7 +329,9 @@ pub fn start_global_input_tap() {
         return;
     }
 
-    let _ = core_window::prompt_accessibility_if_needed();
+    if crate::config::get_input_config().needs_accessibility() {
+        let _ = core_window::prompt_accessibility_if_needed();
+    }
 
     std::thread::Builder::new()
         .name("global-cgeventtap".to_string())
@@ -312,6 +358,9 @@ pub fn start_global_input_tap() {
             if tap.is_null() {
                 loop {
                     std::thread::sleep(std::time::Duration::from_secs(3));
+                    if !crate::config::get_input_config().needs_event_tap() {
+                        continue;
+                    }
                     let retry_tap = CGEventTapCreate(
                         K_CG_HID_EVENT_TAP,
                         K_CG_HEAD_INSERT_EVENT_TAP,
@@ -325,7 +374,8 @@ pub fn start_global_input_tap() {
                         let src = CFMachPortCreateRunLoopSource(std::ptr::null(), retry_tap, 0);
                         let rl = CFRunLoopGetCurrent();
                         CFRunLoopAddSource(rl, src, kCFRunLoopCommonModes);
-                        CGEventTapEnable(retry_tap, true);
+                        let should_enable = crate::config::get_input_config().needs_event_tap();
+                        CGEventTapEnable(retry_tap, should_enable);
                         CFRunLoopRun();
                         break;
                     }
@@ -335,7 +385,8 @@ pub fn start_global_input_tap() {
                 let src = CFMachPortCreateRunLoopSource(std::ptr::null(), tap, 0);
                 let rl = CFRunLoopGetCurrent();
                 CFRunLoopAddSource(rl, src, kCFRunLoopCommonModes);
-                CGEventTapEnable(tap, true);
+                let should_enable = crate::config::get_input_config().needs_event_tap();
+                CGEventTapEnable(tap, should_enable);
                 CFRunLoopRun();
             }
         })

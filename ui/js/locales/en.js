@@ -613,6 +613,16 @@ window.OMNI_LOCALES.en = {
     "about.btn_open": "About Mac Omni Tool",
     "about.nav_btn": "About App",
     "about.modal_desc": "All-in-One Native Rust System Utility for macOS (Apple Silicon M1/M2/M3/M4 & Intel): Multi-Monitor Brightness & Warmth, AirPods/Audio Switcher, Hardware & GPU Monitor, 1,000-Item Clipboard & Screenshot Annotator, Window Tiling, 120Hz Smooth Mouse & System Cleaner.",
-    "about.btn_close": "Close"
+    "about.btn_close": "Close",
+    "update.section_title": "🔄 Automatic Software Update",
+    "update.btn_check": "🔄 Check for Updates",
+    "update.checking": "⏳ Checking GitHub Releases...",
+    "update.up_to_date": "✅ You are running the latest version (v{version})",
+    "update.available_badge": "🎉 New Version v{latest} Available! (Current: v{current})",
+    "update.btn_install_now": "⚡ Auto-Update & Restart Now (v{latest})",
+    "update.btn_download_dmg": "💿 Download .dmg",
+    "update.installing": "⏳ Downloading & installing v{latest}... App will restart automatically!",
+    "update.toast_new_version": "🎉 New version v{latest} is available! Click 'About App' to update.",
+    "update.toast_failed": "Update check failed: {error}"
   }
 };

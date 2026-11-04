@@ -491,6 +491,31 @@ pub fn handle_api_request(body: &[u8], proxy: &EventLoopProxy<AppUserEvent>) -> 
             }
             json!({ "ok": false, "error": "Invalid URL" })
         }
+        "check_for_updates" => {
+            let res = crate::updater::check_for_updates();
+            serde_json::to_value(res).unwrap_or_else(|_| json!({ "ok": false }))
+        }
+        "perform_self_update" => {
+            let zip_url = p.get("zip_url").and_then(|v| v.as_str()).unwrap_or("");
+            let sha256_zip = p.get("sha256_zip").and_then(|v| v.as_str()).unwrap_or("");
+            match crate::updater::download_and_install_update(zip_url, sha256_zip) {
+                Ok(target_path) => {
+                    let quit_proxy = proxy.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(250));
+                        let _ = quit_proxy.send_event(AppUserEvent::QuitApp);
+                    });
+                    json!({
+                        "ok": true,
+                        "target_path": target_path
+                    })
+                }
+                Err(err) => json!({
+                    "ok": false,
+                    "error": err
+                }),
+            }
+        }
         "set_mini_expanded" => {
             let expanded = p.get("expanded").and_then(|v| v.as_bool()).unwrap_or(false);
             let _ = proxy.send_event(AppUserEvent::SetMiniExpanded(expanded));

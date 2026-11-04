@@ -14,7 +14,7 @@ pub use actions::{
     is_finder_frontmost, post_synthetic_key_combo, register_overlay_callback, trigger_system_action,
 };
 pub use carbon_hotkeys::{
-    register_native_carbon_hotkeys, set_overlay_escape_hotkey_active,
+    register_native_carbon_hotkeys, set_overlay_escape_hotkey_active, sync_feature_carbon_hotkeys,
     sync_window_tiling_carbon_hotkeys, trigger_window_snap_debounced,
 };
 pub use config::{
@@ -22,7 +22,7 @@ pub use config::{
     keycode_and_flags_to_shortcut, shortcut_to_carbon_keycode_and_modifiers, shortcuts_match,
     update_input_config, AppMouseProfile, InputAutomationConfig, UiOverlayEvent,
 };
-pub use event_tap::start_global_input_tap;
+pub use event_tap::{start_global_input_tap, sync_event_tap_enabled};
 pub use spaces::{
     frontmost_app_info, get_spaces_status, list_running_gui_apps, query_macos_spaces_counts,
     RunningAppItem, SpacesStatus,
@@ -82,13 +82,42 @@ mod tests {
             "space_left"
         );
 
+        // When global smooth_scroll_enabled is false, even an app with smooth_scroll_mode = "on" must return false
+        cfg.external_mouse_enabled = true;
+        cfg.smooth_scroll_enabled = false;
+        if let Some(p) = cfg.app_mouse_profiles.first_mut() {
+            p.enabled = true;
+            p.smooth_scroll_mode = "on".to_string();
+        }
+        assert!(!cfg.is_smooth_scroll_enabled_for_app("com.google.Chrome"));
+        assert!(!cfg.is_smooth_scroll_enabled_for_app("com.apple.Terminal"));
+
         // When master switch is off, all buttons fall back to "default" and smooth scroll is false
         cfg.external_mouse_enabled = false;
+        cfg.smooth_scroll_enabled = true;
         assert_eq!(
             cfg.resolve_mouse_button_action("com.apple.Terminal", 4),
             "default"
         );
         assert!(!cfg.is_smooth_scroll_enabled_for_app("com.apple.Terminal"));
+    }
+
+    #[test]
+    fn test_needs_event_tap_when_all_features_disabled() {
+        let mut cfg = InputAutomationConfig::default();
+        assert!(cfg.needs_event_tap());
+
+        cfg.finder_cut_paste_enabled = false;
+        cfg.replace_macos_cmd_tab = false;
+        cfg.external_mouse_enabled = false;
+        cfg.clipboard_enabled = false;
+        cfg.screenshot_enabled = false;
+        cfg.window_snapping_enabled = false;
+        cfg.mission_control_shortcut = String::new();
+        cfg.show_desktop_shortcut = String::new();
+
+        assert!(!cfg.needs_event_tap());
+        assert!(!cfg.needs_accessibility());
     }
 
     #[test]

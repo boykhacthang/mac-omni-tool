@@ -31,6 +31,17 @@ Người dùng chỉ cần tải trực tiếp bộ cài **`.dmg`** hoặc **`.z
    xattr -cr /Applications/MacOmniTool.app && open /Applications/MacOmniTool.app
    ```
 
+### 🔄 Tự Động Kiểm Tra & Cập Nhật 1-Click (Auto-Updater)
+- **Dành cho Người dùng (Client)**:
+  - `Mac Omni Tool` tự động kiểm tra bản mới từ [`releases/latest.json`](https://raw.githubusercontent.com/boykhacthang/mac-omni-tool/main/releases/latest.json) mỗi khi mở app (hoặc kiểm tra thủ công tại menu **` -> Mac Omni Tool -> Check for Updates…`** hoặc **`Cài đặt -> Kiểm tra bản cập nhật`**).
+  - Khi có phiên bản mới, chỉ cần bấm nút **"⚡ Tự tải & Cập nhật ngay (1-Click)"**, ứng dụng sẽ tự động tải bản `.zip` mới, kiểm tra mã băm an toàn **SHA-256**, gỡ khóa Gatekeeper (`xattr -cr`), ghi đè `/Applications/MacOmniTool.app` và tự khởi động lại sang bản mới.
+- **Dành cho Nhà phát triển (Phát hành bản mới chỉ với 1 lệnh)**:
+  - Khi muốn tung ra bản cập nhật mới (ví dụ `2.1.0`), chỉ cần chạy duy nhất 1 lệnh:
+    ```bash
+    ./publish_release.sh 2.1.0 "Mô tả các tính năng mới của bản 2.1.0"
+    ```
+  - Script sẽ tự động nâng version trong `Cargo.toml`, build bản Release tối ưu, đóng gói `.dmg` & `.zip` vào `releases/v2.1.0/`, tính mã SHA-256, cập nhật `releases/latest.json`, tạo Git Tag `v2.1.0` và đẩy thẳng lên GitHub để mọi máy client nhận thông báo cập nhật ngay lập tức.
+
 ---
 
 ## 🚀 Các Tính Năng Qua 2 Phiên Bản (`v1.0` & `v2.0`)

@@ -159,23 +159,30 @@ pub fn trigger_system_action(action: &str) {
             });
         }
         "clipboard_popup" => {
-            notify_overlay(UiOverlayEvent::ToggleClipboardLeftDrawer);
+            if get_input_config().clipboard_enabled {
+                notify_overlay(UiOverlayEvent::ToggleClipboardLeftDrawer);
+            }
         }
         "alt_tab" => {
-            notify_overlay(UiOverlayEvent::ToggleAltTabOverlay);
+            if get_input_config().replace_macos_cmd_tab {
+                notify_overlay(UiOverlayEvent::ToggleAltTabOverlay);
+            }
         }
         "screenshot" | "screenshot_region" => {
-            if get_input_config().screenshot_enabled {
+            let cfg = get_input_config();
+            if cfg.screenshot_enabled && cfg.screenshot_region_enabled {
                 notify_overlay(UiOverlayEvent::TriggerScreenshotOverlay);
             }
         }
         "screenshot_full_edit" => {
-            if get_input_config().screenshot_enabled {
+            let cfg = get_input_config();
+            if cfg.screenshot_enabled && cfg.screenshot_fullscreen_edit_enabled {
                 notify_overlay(UiOverlayEvent::TriggerFullscreenEditScreenshot);
             }
         }
         "screenshot_full_copy" => {
-            if get_input_config().screenshot_enabled {
+            let cfg = get_input_config();
+            if cfg.screenshot_enabled && cfg.screenshot_fullscreen_copy_enabled {
                 notify_overlay(UiOverlayEvent::TriggerFullscreenCopyScreenshot);
             }
         }

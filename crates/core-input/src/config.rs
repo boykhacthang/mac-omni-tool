@@ -335,7 +335,7 @@ impl InputAutomationConfig {
 
     /// Determine whether 120Hz smooth scrolling is active for the given frontmost `bundle_id`.
     pub fn is_smooth_scroll_enabled_for_app(&self, bundle_id: &str) -> bool {
-        if !self.external_mouse_enabled {
+        if !self.external_mouse_enabled || !self.smooth_scroll_enabled {
             return false;
         }
         if !bundle_id.is_empty() {
@@ -352,6 +352,42 @@ impl InputAutomationConfig {
             }
         }
         self.smooth_scroll_enabled
+    }
+
+    /// Return `true` when at least one feature that requires the global `CGEventTap` is enabled.
+    pub fn needs_event_tap(&self) -> bool {
+        let screenshot_any = self.screenshot_enabled
+            && (self.screenshot_region_enabled
+                || self.screenshot_fullscreen_edit_enabled
+                || self.screenshot_fullscreen_copy_enabled);
+        let mouse_any = self.external_mouse_enabled
+            && (self.smooth_scroll_enabled
+                || self.invert_external_mouse_scroll
+                || self.shift_horizontal_scroll
+                || self.mouse_buttons_enabled
+                || self.mouse_chord_enabled);
+        mouse_any
+            || self.finder_cut_paste_enabled
+            || self.replace_macos_cmd_tab
+            || self.window_snapping_enabled
+            || self.clipboard_enabled
+            || screenshot_any
+            || !self.mission_control_shortcut.trim().is_empty()
+            || !self.show_desktop_shortcut.trim().is_empty()
+    }
+
+    /// Return `true` when at least one feature that requires macOS Accessibility (`AXIsProcessTrusted`) is enabled.
+    pub fn needs_accessibility(&self) -> bool {
+        let mouse_any = self.external_mouse_enabled
+            && (self.smooth_scroll_enabled
+                || self.invert_external_mouse_scroll
+                || self.shift_horizontal_scroll
+                || self.mouse_buttons_enabled
+                || self.mouse_chord_enabled);
+        mouse_any
+            || self.finder_cut_paste_enabled
+            || self.replace_macos_cmd_tab
+            || self.window_snapping_enabled
     }
 }
 
@@ -417,23 +453,11 @@ fn normalize_config(cfg: &mut InputAutomationConfig) {
     cfg.mission_control_shortcut = canonicalize_shortcut(&cfg.mission_control_shortcut);
     cfg.show_desktop_shortcut = canonicalize_shortcut(&cfg.show_desktop_shortcut);
     cfg.clipboard_popup_shortcut = canonicalize_shortcut(&cfg.clipboard_popup_shortcut);
-    if cfg.screenshot_shortcut.trim().is_empty() {
-        cfg.screenshot_shortcut = default_screenshot_shortcut();
-    } else {
-        cfg.screenshot_shortcut = canonicalize_shortcut(&cfg.screenshot_shortcut);
-    }
-    if cfg.screenshot_fullscreen_edit_shortcut.trim().is_empty() {
-        cfg.screenshot_fullscreen_edit_shortcut = default_screenshot_fullscreen_edit_shortcut();
-    } else {
-        cfg.screenshot_fullscreen_edit_shortcut =
-            canonicalize_shortcut(&cfg.screenshot_fullscreen_edit_shortcut);
-    }
-    if cfg.screenshot_fullscreen_copy_shortcut.trim().is_empty() {
-        cfg.screenshot_fullscreen_copy_shortcut = default_screenshot_fullscreen_copy_shortcut();
-    } else {
-        cfg.screenshot_fullscreen_copy_shortcut =
-            canonicalize_shortcut(&cfg.screenshot_fullscreen_copy_shortcut);
-    }
+    cfg.screenshot_shortcut = canonicalize_shortcut(&cfg.screenshot_shortcut);
+    cfg.screenshot_fullscreen_edit_shortcut =
+        canonicalize_shortcut(&cfg.screenshot_fullscreen_edit_shortcut);
+    cfg.screenshot_fullscreen_copy_shortcut =
+        canonicalize_shortcut(&cfg.screenshot_fullscreen_copy_shortcut);
     let canon_alt = canonicalize_shortcut(&cfg.alt_tab_shortcut);
     cfg.alt_tab_shortcut = if canon_alt.eq_ignore_ascii_case("Option+Tab") {
         "Cmd+Tab".to_string()
@@ -486,6 +510,16 @@ pub fn get_input_config() -> InputAutomationConfig {
 
 pub fn update_input_config(mut new_cfg: InputAutomationConfig) -> InputAutomationConfig {
     normalize_config(&mut new_cfg);
+    if !new_cfg.finder_cut_paste_enabled {
+        FINDER_CUT_PENDING.store(false, Ordering::SeqCst);
+    }
+    if !new_cfg.external_mouse_enabled || !new_cfg.smooth_scroll_enabled {
+        crate::smooth_scroll::stop_smooth_scroll_momentum();
+    }
+    if !new_cfg.external_mouse_enabled || !new_cfg.mouse_buttons_enabled {
+        crate::spaces::LAST_MOUSE_BUTTON.store(0, Ordering::Relaxed);
+        crate::spaces::LAST_MOUSE_BUTTON_AT_MS.store(0, Ordering::Relaxed);
+    }
     let mut guard = config_mutex().lock().unwrap();
     *guard = new_cfg;
     let mut cloned = guard.clone();
@@ -495,6 +529,7 @@ pub fn update_input_config(mut new_cfg: InputAutomationConfig) -> InputAutomatio
     }
     drop(guard);
     sync_window_tiling_carbon_hotkeys();
+    crate::event_tap::sync_event_tap_enabled(cloned.needs_event_tap());
     cloned
 }
 

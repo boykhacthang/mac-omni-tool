@@ -611,6 +611,16 @@ window.OMNI_LOCALES.vi = {
     "about.btn_open": "Giới thiệu Mac Omni Tool",
     "about.nav_btn": "Giới thiệu",
     "about.modal_desc": "Bộ công cụ hệ thống All-in-One viết bằng Native Rust cho macOS (Apple Silicon M1/M2/M3/M4 & Intel): Độ sáng & màu màn hình rời, Chuyển nhanh AirPods/Loa, Giám sát CPU/GPU/RAM/Nhiệt độ, Clipboard 1.000 mục & Chụp màn hình, Chia cửa sổ, Chuột rời 120Hz & Dọn rác hệ thống.",
-    "about.btn_close": "Đóng"
+    "about.btn_close": "Đóng",
+    "update.section_title": "🔄 Tự Động Cập Nhật Phiên Bản Mới",
+    "update.btn_check": "🔄 Kiểm tra cập nhật",
+    "update.checking": "⏳ Đang kiểm tra phiên bản trên GitHub...",
+    "update.up_to_date": "✅ Bạn đang dùng phiên bản mới nhất (v{version})",
+    "update.available_badge": "🎉 Có bản cập nhật mới v{latest}! (Hiện tại: v{current})",
+    "update.btn_install_now": "⚡ Tự động Cập nhật & Khởi động lại (v{latest})",
+    "update.btn_download_dmg": "💿 Tải file .dmg",
+    "update.installing": "⏳ Đang tải & cài đặt v{latest}... Ứng dụng sẽ tự khởi động lại!",
+    "update.toast_new_version": "🎉 Đã có phiên bản mới v{latest}! Bấm 'Giới thiệu' để tự động cập nhật.",
+    "update.toast_failed": "Không thể kiểm tra cập nhật: {error}"
   }
 };

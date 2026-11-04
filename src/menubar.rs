@@ -282,7 +282,31 @@ pub unsafe fn setup_macos_application_menu() {
                             0,
                         );
 
-                        // 1. GitHub Repository
+                        // 1. Check for Updates…
+                        let upd_title = make_nsstring("Check for Updates…");
+                        let upd_alloc = msg0(ns_item_cls, sel_registerName(c"alloc".as_ptr()));
+                        let upd_item = msg_init_item(
+                            upd_alloc,
+                            sel_registerName(
+                                c"initWithTitle:action:keyEquivalent:".as_ptr(),
+                            ),
+                            upd_title,
+                            sel_registerName(c"aboutMenuClicked:".as_ptr()),
+                            empty_key,
+                        );
+                        msg1_ptr(
+                            upd_item,
+                            sel_registerName(c"setTarget:".as_ptr()),
+                            target_obj,
+                        );
+                        msg_insert(
+                            app_submenu,
+                            sel_registerName(c"insertItem:atIndex:".as_ptr()),
+                            upd_item,
+                            1,
+                        );
+
+                        // 2. GitHub Repository
                         let gh_title =
                             make_nsstring("GitHub: boykhacthang/mac-omni-tool");
                         let gh_alloc = msg0(ns_item_cls, sel_registerName(c"alloc".as_ptr()));
@@ -304,10 +328,10 @@ pub unsafe fn setup_macos_application_menu() {
                             app_submenu,
                             sel_registerName(c"insertItem:atIndex:".as_ptr()),
                             gh_item,
-                            1,
+                            2,
                         );
 
-                        // 2. Settings... (Cmd+,)
+                        // 3. Settings... (Cmd+,)
                         let set_title = make_nsstring("Settings…");
                         let set_alloc = msg0(ns_item_cls, sel_registerName(c"alloc".as_ptr()));
                         let set_item = msg_init_item(
@@ -328,16 +352,16 @@ pub unsafe fn setup_macos_application_menu() {
                             app_submenu,
                             sel_registerName(c"insertItem:atIndex:".as_ptr()),
                             set_item,
-                            2,
+                            3,
                         );
 
-                        // 3. Separator
+                        // 4. Separator
                         let sep = msg0(ns_item_cls, sel_registerName(c"separatorItem".as_ptr()));
                         msg_insert(
                             app_submenu,
                             sel_registerName(c"insertItem:atIndex:".as_ptr()),
                             sep,
-                            3,
+                            4,
                         );
 
                         // Ensure Quit item exists if menu was empty

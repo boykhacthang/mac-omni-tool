@@ -77,6 +77,7 @@ pub fn list_open_windows(with_previews: bool) -> Vec<OpenWindowItem> {
     let my_pid = std::process::id() as i32;
 
     unsafe {
+        let can_capture_previews = with_previews && CGPreflightScreenCaptureAccess();
         // kCGWindowListOptionOnScreenOnly (1) | kCGWindowListExcludeDesktopElements (16) = 17
         let info_array = CGWindowListCopyWindowInfo(17, 0);
         if info_array.is_null() {
@@ -159,7 +160,7 @@ pub fn list_open_windows(with_previews: bool) -> Vec<OpenWindowItem> {
                 raw_title
             };
 
-            let preview_data_url = if with_previews && result.len() < 12 {
+            let preview_data_url = if can_capture_previews && result.len() < 12 {
                 capture_window_thumbnail_data_url(window_id as u32)
             } else {
                 String::new()

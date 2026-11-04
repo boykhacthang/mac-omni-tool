@@ -5,7 +5,7 @@ use crate::actions::{
     notify_overlay, notify_overlay_immediate, now_ms, trigger_system_action,
 };
 use crate::config::{
-    get_input_config, shortcut_to_carbon_keycode_and_modifiers, shortcuts_match, UiOverlayEvent,
+    get_input_config, shortcut_to_carbon_keycode_and_modifiers, UiOverlayEvent,
 };
 use crate::ffi::*;
 use std::ffi::c_void;
@@ -16,9 +16,93 @@ pub(crate) static OVERLAY_ESCAPE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static ESCAPE_HOTKEY_REF: AtomicI64 = AtomicI64::new(0);
 static LAST_WINDOW_SNAP_MS: AtomicI64 = AtomicI64::new(0);
 static WINDOW_TILING_HOTKEY_REFS: OnceLock<Mutex<Vec<(usize, String)>>> = OnceLock::new();
+static FEATURE_HOTKEY_REFS: OnceLock<Mutex<Vec<usize>>> = OnceLock::new();
 
 fn window_tiling_refs() -> &'static Mutex<Vec<(usize, String)>> {
     WINDOW_TILING_HOTKEY_REFS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn feature_hotkey_refs() -> &'static Mutex<Vec<usize>> {
+    FEATURE_HOTKEY_REFS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Synchronize OS-level Carbon HotKeys for Clipboard (`id = 2`), Mission Control (`id = 3`),
+/// Screenshot modes (`id = 4, 5, 6`), and Show Desktop (`id = 7`).
+/// Immediately unregisters (`UnregisterEventHotKey`) any hotkey whose feature toggle is OFF.
+pub fn sync_feature_carbon_hotkeys() {
+    unsafe {
+        let target = GetApplicationEventTarget();
+        if target.is_null() {
+            return;
+        }
+        let mut guard = feature_hotkey_refs().lock().unwrap();
+        for hk_ptr in guard.drain(..) {
+            if hk_ptr != 0 {
+                let _ = UnregisterEventHotKey(hk_ptr as *mut c_void);
+            }
+        }
+
+        let cfg = get_input_config();
+        let sig: u32 = 0x4F4D_4E49; // 'OMNI'
+
+        let mut register_if_active = |id: u32, active: bool, shortcut: &str| {
+            if !active || shortcut.trim().is_empty() {
+                return;
+            }
+            if let Some((kc, mods)) = shortcut_to_carbon_keycode_and_modifiers(shortcut) {
+                let mut hk_ref: *mut c_void = std::ptr::null_mut();
+                let status = RegisterEventHotKey(
+                    kc,
+                    mods,
+                    EventHotKeyID { signature: sig, id },
+                    target,
+                    0,
+                    &mut hk_ref,
+                );
+                if status == 0 && !hk_ref.is_null() {
+                    guard.push(hk_ref as usize);
+                }
+            }
+        };
+
+        // Hotkey 2: Clipboard Left Drawer
+        register_if_active(2, cfg.clipboard_enabled, &cfg.clipboard_popup_shortcut);
+
+        // Hotkey 3: Mission Control (F3)
+        register_if_active(
+            3,
+            !cfg.mission_control_shortcut.trim().is_empty(),
+            &cfg.mission_control_shortcut,
+        );
+
+        // Hotkey 4: Screenshot Mode 1 (Region)
+        register_if_active(
+            4,
+            cfg.screenshot_enabled && cfg.screenshot_region_enabled,
+            &cfg.screenshot_shortcut,
+        );
+
+        // Hotkey 5: Screenshot Mode 2 (Fullscreen + Annotation)
+        register_if_active(
+            5,
+            cfg.screenshot_enabled && cfg.screenshot_fullscreen_edit_enabled,
+            &cfg.screenshot_fullscreen_edit_shortcut,
+        );
+
+        // Hotkey 6: Screenshot Mode 3 (Fullscreen + Instant Copy)
+        register_if_active(
+            6,
+            cfg.screenshot_enabled && cfg.screenshot_fullscreen_copy_enabled,
+            &cfg.screenshot_fullscreen_copy_shortcut,
+        );
+
+        // Hotkey 7: Show Desktop (F11)
+        register_if_active(
+            7,
+            !cfg.show_desktop_shortcut.trim().is_empty(),
+            &cfg.show_desktop_shortcut,
+        );
+    }
 }
 
 /// Trigger a window tiling layout with a 140ms debounce so simultaneous Carbon HotKey + CGEventTap never double-fire.
@@ -40,9 +124,11 @@ pub fn trigger_window_snap_debounced(action: &str) {
     });
 }
 
-/// Synchronize OS-level Carbon HotKeys for all enabled Window Tiling bindings (`id = 100..150`).
-/// Guarantees `Ctrl+Option+C`, `Ctrl+Option+Left/Right/Up/Down/Enter`, etc. work even if `CGEventTap` is blocked.
+/// Synchronize OS-level Carbon HotKeys for all enabled features and Window Tiling bindings (`id = 100..150`).
+/// Guarantees `Ctrl+Option+C`, `Ctrl+Option+Left/Right/Up/Down/Enter`, etc. work even if `CGEventTap` is blocked,
+/// and unregisters any hotkey whose toggle is OFF.
 pub fn sync_window_tiling_carbon_hotkeys() {
+    sync_feature_carbon_hotkeys();
     unsafe {
         let target = GetApplicationEventTarget();
         if target.is_null() {
@@ -144,18 +230,20 @@ unsafe extern "C" fn carbon_hotkey_handler(
         let cfg = get_input_config();
         match hk_id.id {
             2 => {
-                if cfg.clipboard_enabled {
+                if cfg.clipboard_enabled && !cfg.clipboard_popup_shortcut.trim().is_empty() {
                     notify_overlay(UiOverlayEvent::ToggleClipboardLeftDrawer);
                 }
             }
             3 => {
-                notify_overlay_immediate(UiOverlayEvent::HideAllOverlays);
-                trigger_system_action("mission_control");
+                if !cfg.mission_control_shortcut.trim().is_empty() {
+                    notify_overlay_immediate(UiOverlayEvent::HideAllOverlays);
+                    trigger_system_action("mission_control");
+                }
             }
             4 => {
                 if cfg.screenshot_enabled
                     && cfg.screenshot_region_enabled
-                    && shortcuts_match(&cfg.screenshot_shortcut, "Cmd+Shift+0")
+                    && !cfg.screenshot_shortcut.trim().is_empty()
                 {
                     notify_overlay(UiOverlayEvent::TriggerScreenshotOverlay);
                 }
@@ -163,7 +251,7 @@ unsafe extern "C" fn carbon_hotkey_handler(
             5 => {
                 if cfg.screenshot_enabled
                     && cfg.screenshot_fullscreen_edit_enabled
-                    && shortcuts_match(&cfg.screenshot_fullscreen_edit_shortcut, "Cmd+Shift+9")
+                    && !cfg.screenshot_fullscreen_edit_shortcut.trim().is_empty()
                 {
                     notify_overlay(UiOverlayEvent::TriggerFullscreenEditScreenshot);
                 }
@@ -171,9 +259,14 @@ unsafe extern "C" fn carbon_hotkey_handler(
             6 => {
                 if cfg.screenshot_enabled
                     && cfg.screenshot_fullscreen_copy_enabled
-                    && shortcuts_match(&cfg.screenshot_fullscreen_copy_shortcut, "Cmd+Shift+8")
+                    && !cfg.screenshot_fullscreen_copy_shortcut.trim().is_empty()
                 {
                     notify_overlay(UiOverlayEvent::TriggerFullscreenCopyScreenshot);
+                }
+            }
+            7 => {
+                if !cfg.show_desktop_shortcut.trim().is_empty() {
+                    trigger_system_action("show_desktop");
                 }
             }
             99 => {
@@ -215,63 +308,6 @@ pub fn register_native_carbon_hotkeys() {
             &spec,
             std::ptr::null_mut(),
             &mut handler_ref,
-        );
-
-        let sig: u32 = 0x4F4D_4E49; // 'OMNI'
-        let mut hk2: *mut c_void = std::ptr::null_mut();
-        let mut hk3: *mut c_void = std::ptr::null_mut();
-        let mut hk4: *mut c_void = std::ptr::null_mut();
-        let mut hk5: *mut c_void = std::ptr::null_mut();
-        let mut hk6: *mut c_void = std::ptr::null_mut();
-
-        // Hotkey 2: Cmd + Shift + V -> keycode 9 ('V')
-        RegisterEventHotKey(
-            9,
-            CARBON_CMD_KEY | CARBON_SHIFT_KEY,
-            EventHotKeyID { signature: sig, id: 2 },
-            target,
-            0,
-            &mut hk2,
-        );
-
-        // Hotkey 3: F3 -> keycode 99
-        RegisterEventHotKey(
-            99,
-            0,
-            EventHotKeyID { signature: sig, id: 3 },
-            target,
-            0,
-            &mut hk3,
-        );
-
-        // Hotkey 4: Cmd + Shift + 0 -> keycode 29 ('0')
-        RegisterEventHotKey(
-            29,
-            CARBON_CMD_KEY | CARBON_SHIFT_KEY,
-            EventHotKeyID { signature: sig, id: 4 },
-            target,
-            0,
-            &mut hk4,
-        );
-
-        // Hotkey 5: Cmd + Shift + 9 -> keycode 25 ('9')
-        RegisterEventHotKey(
-            25,
-            CARBON_CMD_KEY | CARBON_SHIFT_KEY,
-            EventHotKeyID { signature: sig, id: 5 },
-            target,
-            0,
-            &mut hk5,
-        );
-
-        // Hotkey 6: Cmd + Shift + 8 -> keycode 28 ('8')
-        RegisterEventHotKey(
-            28,
-            CARBON_CMD_KEY | CARBON_SHIFT_KEY,
-            EventHotKeyID { signature: sig, id: 6 },
-            target,
-            0,
-            &mut hk6,
         );
     }
 

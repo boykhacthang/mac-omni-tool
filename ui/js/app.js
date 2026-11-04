@@ -1,12 +1,97 @@
 // =============================================================================
-// MAIN DASHBOARD SHELL, ABOUT MODAL & MULTI-WINDOW MODE ROUTER
+// MAIN DASHBOARD SHELL, ABOUT MODAL, AUTO-UPDATER & MULTI-WINDOW MODE ROUTER
 // =============================================================================
+let cachedUpdateState = null;
+
+async function runUpdateCheckInModal() {
+  const box = document.getElementById("about-update-status-box");
+  if (!box) return;
+  box.innerHTML = `<div class="stat-sub">${t("update.checking")}</div>`;
+
+  const res = await api("check_for_updates");
+  cachedUpdateState = res;
+  if (!document.getElementById("about-update-status-box")) return;
+
+  if (!res || !res.ok) {
+    const errMsg = (res && res.error) ? res.error : "Network error";
+    box.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+        <span class="badge-warn">${escapeHtml(t("update.toast_failed", { error: errMsg }))}</span>
+        <button class="btn btn-sm" id="btn-retry-update-check">${t("update.btn_check")}</button>
+      </div>
+    `;
+    const retryBtn = document.getElementById("btn-retry-update-check");
+    if (retryBtn) retryBtn.onclick = () => runUpdateCheckInModal();
+    return;
+  }
+
+  if (res.has_update) {
+    const notes = getAppLang() === "vi" ? (res.notes_vi || res.notes_en || "") : (res.notes_en || res.notes_vi || "");
+    box.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+          <span class="badge-ok" style="font-size:12px;padding:3px 9px;">
+            ${escapeHtml(t("update.available_badge", { latest: res.latest_version, current: res.current_version }))}
+          </span>
+          ${res.published_at ? `<span class="stat-sub">${escapeHtml(res.published_at)}</span>` : ""}
+        </div>
+        ${notes ? `
+          <div style="font-size:11.5px;color:var(--text-muted);background:var(--bg-card);border:1px solid var(--border);border-radius:7px;padding:7px 10px;max-height:85px;overflow-y:auto;white-space:pre-line;">${escapeHtml(notes)}</div>
+        ` : ""}
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;" id="update-action-buttons-row">
+          <button class="btn btn-sm btn-primary" id="btn-perform-self-update">
+            ${escapeHtml(t("update.btn_install_now", { latest: res.latest_version }))}
+          </button>
+          <button class="btn btn-sm" id="btn-download-update-dmg">
+            ${t("update.btn_download_dmg")}
+          </button>
+        </div>
+      </div>
+    `;
+
+    const installBtn = document.getElementById("btn-perform-self-update");
+    if (installBtn) {
+      installBtn.onclick = async () => {
+        const row = document.getElementById("update-action-buttons-row");
+        if (row) {
+          row.innerHTML = `<span class="badge-ok">${escapeHtml(t("update.installing", { latest: res.latest_version }))}</span>`;
+        }
+        const updRes = await api("perform_self_update", {
+          zip_url: res.zip_url,
+          sha256_zip: res.sha256_zip || ""
+        });
+        if (!updRes || !updRes.ok) {
+          showToast(t("update.toast_failed", { error: (updRes && updRes.error) || "Update failed" }));
+          runUpdateCheckInModal();
+        }
+      };
+    }
+
+    const dmgBtn = document.getElementById("btn-download-update-dmg");
+    if (dmgBtn && res.dmg_url) {
+      dmgBtn.onclick = () => api("open_external_url", { url: res.dmg_url });
+    }
+  } else {
+    box.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+        <span class="badge-ok" style="font-size:11.5px;padding:3px 9px;">
+          ${escapeHtml(t("update.up_to_date", { version: res.current_version }))}
+        </span>
+        <button class="btn btn-sm" id="btn-recheck-update-modal">${t("update.btn_check")}</button>
+      </div>
+    `;
+    const recheckBtn = document.getElementById("btn-recheck-update-modal");
+    if (recheckBtn) recheckBtn.onclick = () => runUpdateCheckInModal();
+  }
+}
+
 function showAboutModalDialog() {
   const existing = document.getElementById("about-modal-backdrop");
   if (existing) {
     existing.remove();
   }
 
+  const curVer = (cachedUpdateState && cachedUpdateState.current_version) || "2.0.0";
   const backdrop = document.createElement("div");
   backdrop.id = "about-modal-backdrop";
   backdrop.className = "about-modal-backdrop";
@@ -18,12 +103,22 @@ function showAboutModalDialog() {
           <div>
             <div style="font-size:17px;font-weight:800;letter-spacing:-0.3px;">Mac Omni Tool</div>
             <div style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;margin-top:2px;">
-              <span class="badge-ok">v2.0.0</span>
+              <span class="badge-ok">v${escapeHtml(curVer)}</span>
               <span>Free Community Edition • MIT License</span>
             </div>
           </div>
         </div>
         <button class="btn btn-sm" id="btn-close-about-x" title="Close">✕</button>
+      </div>
+
+      <!-- AUTO-UPDATER SECTION -->
+      <div style="background:var(--bg-input);border:1px solid rgba(59,130,246,0.32);border-radius:10px;padding:10px 13px;margin-bottom:12px;">
+        <div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:6px;">
+          ${t("update.section_title")}
+        </div>
+        <div id="about-update-status-box">
+          <div class="stat-sub">${t("update.checking")}</div>
+        </div>
       </div>
 
       <div style="background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:12.5px;line-height:1.55;">
@@ -71,6 +166,8 @@ function showAboutModalDialog() {
   document.getElementById("btn-about-kofi").onclick = () => {
     api("open_external_url", { url: "https://ko-fi.com/I1R72A1475" });
   };
+
+  runUpdateCheckInModal();
 }
 
 window.__showAboutModal = showAboutModalDialog;
@@ -214,6 +311,24 @@ async function initMainDashboard() {
 
   renderShell();
   renderActiveTab();
+
+  // Silent background update check 3.5s after launch
+  setTimeout(async () => {
+    try {
+      const res = await api("check_for_updates");
+      cachedUpdateState = res;
+      if (res && res.ok && res.has_update) {
+        showToast(t("update.toast_new_version", { latest: res.latest_version }));
+        const aboutBtn = document.getElementById("btn-sidebar-about");
+        if (aboutBtn) {
+          aboutBtn.classList.add("btn-primary");
+          aboutBtn.textContent = `🎉 v${res.latest_version}`;
+        }
+      }
+    } catch (_e) {
+      // ignore offline
+    }
+  }, 3500);
 }
 
 // =============================================================================

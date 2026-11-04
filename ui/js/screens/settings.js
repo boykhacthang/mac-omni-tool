@@ -330,6 +330,9 @@ async function renderUnifiedSettingsScreen(view) {
             <span class="badge-ok">v2.0.0 • MIT License</span>
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-sm btn-primary" id="btn-check-update-settings">
+              ${t("update.btn_check")}
+            </button>
             <button class="btn btn-sm" id="btn-open-github" title="https://github.com/boykhacthang/mac-omni-tool">
               ⭐ GitHub (boykhacthang/mac-omni-tool)
             </button>
@@ -368,6 +371,14 @@ async function renderUnifiedSettingsScreen(view) {
   const aboutBtn = document.getElementById("btn-show-about-dialog");
   if (aboutBtn) {
     aboutBtn.onclick = () => {
+      if (typeof window.__showAboutModal === "function") {
+        window.__showAboutModal();
+      }
+    };
+  }
+  const checkUpdSettingsBtn = document.getElementById("btn-check-update-settings");
+  if (checkUpdSettingsBtn) {
+    checkUpdSettingsBtn.onclick = () => {
       if (typeof window.__showAboutModal === "function") {
         window.__showAboutModal();
       }

@@ -31,6 +31,17 @@ You can download the pre-built **`.dmg` Installer** or **`.zip` App Bundle** dir
    xattr -cr /Applications/MacOmniTool.app && open /Applications/MacOmniTool.app
    ```
 
+### 🔄 Built-in 1-Click Auto-Updater (For End Users & Maintainers)
+- **For Users (Client Auto-Update)**:
+  - `Mac Omni Tool` automatically checks [`releases/latest.json`](https://raw.githubusercontent.com/boykhacthang/mac-omni-tool/main/releases/latest.json) on startup (or manually via **` -> Mac Omni Tool -> Check for Updates…`** or **`Settings -> Check for Updates`**).
+  - When a newer version is available, click **"⚡ Auto-Update & Restart Now"** to automatically download the `.zip` update, verify its **SHA-256** checksum, clear macOS Gatekeeper quarantine (`xattr -cr`), replace `/Applications/MacOmniTool.app` in place, and relaunch the updated app in seconds.
+- **For Maintainers (1-Command Release Publishing)**:
+  - Whenever you release a new version (e.g., `2.1.0`), simply run:
+    ```bash
+    ./publish_release.sh 2.1.0 "Added new features and bug fixes"
+    ```
+  - This single command automatically updates `Cargo.toml`, compiles the release `.app`, packages the `.dmg` & `.zip` into `releases/v2.1.0/`, computes SHA-256 hashes, updates `releases/latest.json`, commits, tags `v2.1.0`, and pushes everything to GitHub so all client machines receive the update notification immediately.
+
 ---
 
 ## 🚀 Feature Evolution Across 2 Versions (`v1.0` & `v2.0`)

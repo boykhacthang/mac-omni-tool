@@ -13,6 +13,27 @@ use std::time::Duration;
 static LAST_CHANGE_COUNT: AtomicIsize = AtomicIsize::new(-1);
 static WATCHER_RUNNING: AtomicBool = AtomicBool::new(false);
 
+/// Synchronize `LAST_CHANGE_COUNT` with the current `NSPasteboard.generalPasteboard.changeCount`
+/// so items copied while the Clipboard Manager was disabled are not retroactively captured upon re-enabling.
+pub fn sync_pasteboard_change_count() {
+    unsafe {
+        let pool = objc_autoreleasePoolPush();
+        let pb_cls = objc_getClass(c"NSPasteboard".as_ptr());
+        if !pb_cls.is_null() {
+            type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+            type Msg0Isize = unsafe extern "C" fn(*mut c_void, *mut c_void) -> isize;
+            let msg0: Msg0 = std::mem::transmute(objc_msgSend as *const c_void);
+            let msg0_isize: Msg0Isize = std::mem::transmute(objc_msgSend as *const c_void);
+            let pb = msg0(pb_cls, sel_registerName(c"generalPasteboard".as_ptr()));
+            if !pb.is_null() {
+                let current_count = msg0_isize(pb, sel_registerName(c"changeCount".as_ptr()));
+                LAST_CHANGE_COUNT.store(current_count, Ordering::SeqCst);
+            }
+        }
+        objc_autoreleasePoolPop(pool);
+    }
+}
+
 /// Write arbitrary UTF-8 text directly to macOS `NSPasteboard`.
 pub fn copy_text_to_clipboard(text: &str) -> bool {
     unsafe {

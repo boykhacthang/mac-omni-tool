@@ -4,6 +4,7 @@ mod menubar;
 mod rpc;
 mod single_instance;
 mod ui_assets;
+mod updater;
 mod webview;
 
 use crate::events::{screenshot_session, AppUserEvent, ScreenshotSlotData, MAX_SCREENSHOT_SLOTS};

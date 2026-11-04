@@ -17,7 +17,10 @@ pub fn is_clipboard_enabled() -> bool {
 }
 
 pub fn set_clipboard_enabled(enabled: bool) {
-    CLIPBOARD_ENABLED.store(enabled, Ordering::SeqCst);
+    let was_enabled = CLIPBOARD_ENABLED.swap(enabled, Ordering::SeqCst);
+    if enabled && !was_enabled {
+        crate::pasteboard::sync_pasteboard_change_count();
+    }
 }
 
 fn db_mutex() -> &'static Mutex<()> {
