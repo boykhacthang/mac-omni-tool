@@ -25,7 +25,8 @@ sed -i '' -E "s/<string>[0-9]+\.[0-9]+\.[0-9]+<\/string>/<string>${VERSION}<\/st
 cargo test --workspace
 ./build_installer_dmg.sh
 
-# 3. Lưu bộ cài vào thư mục releases/v<VERSION>/
+# 3. Dọn dẹp bản cũ và lưu bộ cài mới vào thư mục releases/v<VERSION>/
+rm -rf releases/v*
 REL_DIR="releases/v${VERSION}"
 mkdir -p "$REL_DIR"
 DMG_FILE="${REL_DIR}/MacOmniTool-v${VERSION}-Installer.dmg"

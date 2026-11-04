@@ -89,8 +89,8 @@ async function runUpdateCheckInModal(forceManual = false) {
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
           <span class="badge-ok" style="font-size:12px;padding:3px 9px;">
             ${escapeHtml(isSkipped
-              ? t("update.skipped_badge", { latest: res.latest_version, current: res.current_version })
-              : t("update.available_badge", { latest: res.latest_version, current: res.current_version }))}
+      ? t("update.skipped_badge", { latest: res.latest_version, current: res.current_version })
+      : t("update.available_badge", { latest: res.latest_version, current: res.current_version }))}
           </span>
           ${res.published_at ? `<span class="stat-sub">${escapeHtml(res.published_at)}</span>` : ""}
         </div>

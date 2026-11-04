@@ -21,8 +21,6 @@ You can download the pre-built **`.dmg` Installer** or **`.zip` App Bundle** dir
 | Version | Status | 💿 macOS `.dmg` Installer | 🗜️ macOS `.zip` Portable | 📋 Release Page |
 | :--- | :--- | :--- | :--- | :--- |
 | **v2.1.0** | 🌟 **Latest Stable** | [**⬇️ Download `MacOmniTool-v2.1.0-Installer.dmg` (3.2 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.1.0/MacOmniTool-v2.1.0-Installer.dmg) | [**⬇️ Download `MacOmniTool-v2.1.0-macOS.zip` (2.7 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.1.0/MacOmniTool-v2.1.0-macOS.zip) | [GitHub Release v2.1.0](https://github.com/boykhacthang/mac-omni-tool/releases/tag/v2.1.0) |
-| **v2.0.0** | 📦 Previous Stable | [**⬇️ Download `MacOmniTool-v2.0.0-Installer.dmg` (3.1 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.0.0/MacOmniTool-v2.0.0-Installer.dmg) | [**⬇️ Download `MacOmniTool-v2.0.0-macOS.zip` (2.6 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.0.0/MacOmniTool-v2.0.0-macOS.zip) | [GitHub Release v2.0.0](https://github.com/boykhacthang/mac-omni-tool/releases/tag/v2.0.0) |
-| **v1.0.0** | 📦 Core Edition | [**⬇️ Download `MacOmniTool-v1.0.0-Installer.dmg` (3.1 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v1.0.0/MacOmniTool-v1.0.0-Installer.dmg) | [**⬇️ Download `MacOmniTool-v1.0.0-macOS.zip` (2.6 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v1.0.0/MacOmniTool-v1.0.0-macOS.zip) | [GitHub Release v1.0.0](https://github.com/boykhacthang/mac-omni-tool/releases/tag/v1.0.0) |
 
 ### ⚡ Quick Installation Steps (30 Seconds)
 1. Download **`MacOmniTool-v2.1.0-Installer.dmg`** above and double-click to open it.
