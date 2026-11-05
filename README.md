@@ -30,10 +30,10 @@ You can download the pre-built **`.dmg` Installer** or **`.zip` App Bundle** dir
    xattr -cr /Applications/MacOmniTool.app && open /Applications/MacOmniTool.app
    ```
 
-### 🔄 Built-in 1-Click Auto-Updater (For End Users & Maintainers)
-- **For Users (Client Auto-Update)**:
-  - `Mac Omni Tool` automatically checks [`releases/latest.json`](https://raw.githubusercontent.com/boykhacthang/mac-omni-tool/main/releases/latest.json) on startup (or manually via **` -> Mac Omni Tool -> Check for Updates…`** or **`Settings -> Check for Updates`**).
-  - When a newer version is available, click **"⚡ Auto-Update & Restart Now"** to automatically download the `.zip` update, verify its **SHA-256** checksum, clear macOS Gatekeeper quarantine (`xattr -cr`), replace `/Applications/MacOmniTool.app` in place, and relaunch the updated app in seconds.
+### 🔔 User-Controlled Update Notifications & Confirmation
+- **For Users (Notify Only — Never Auto-Updates Without Confirmation)**:
+  - `Mac Omni Tool` checks [`releases/latest.json`](https://raw.githubusercontent.com/boykhacthang/mac-omni-tool/main/releases/latest.json) on startup (or manually via **` -> Mac Omni Tool -> Check for Updates…`** or **`Settings -> Check for Updates`**) and **only displays a non-intrusive notification banner** when a new version is available.
+  - The app **never updates itself automatically in the background**. You can review the release notes and choose to **Update Now** (with an explicit confirmation step that verifies the **SHA-256** checksum, replaces `/Applications/MacOmniTool.app`, and restarts), **Download `.dmg` Manually**, **Remind Me Later**, or **Skip Version**.
 - **For Maintainers (1-Command Release Publishing)**:
   - Whenever you release a new version (e.g., `2.1.0`), simply run:
     ```bash

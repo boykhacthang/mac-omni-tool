@@ -1,13 +1,79 @@
 // =============================================================================
-// MAIN DASHBOARD SHELL, ABOUT MODAL, AUTO-UPDATER & MULTI-WINDOW MODE ROUTER
+// MAIN DASHBOARD SHELL, ABOUT MODAL, UPDATE NOTIFIER & MULTI-WINDOW MODE ROUTER
 // =============================================================================
 let cachedUpdateState = null;
+let dismissedUpdateBannerForSession = false;
 
 function resetSidebarAboutButton() {
   const aboutBtn = document.getElementById("btn-sidebar-about");
   if (aboutBtn) {
     aboutBtn.classList.remove("btn-primary");
     aboutBtn.innerHTML = `ℹ️ ${t("about.nav_btn")}`;
+  }
+}
+
+function hideUpdateNotificationBanner() {
+  const banner = document.getElementById("update-notify-banner");
+  if (banner) {
+    banner.style.display = "none";
+    banner.innerHTML = "";
+  }
+}
+
+function renderUpdateNotificationBanner(res) {
+  const banner = document.getElementById("update-notify-banner");
+  if (!banner || !res || !res.has_update || dismissedUpdateBannerForSession) {
+    return;
+  }
+  banner.style.display = "block";
+  banner.innerHTML = `
+    <div style="margin:0 0 12px 0;padding:10px 14px;border-radius:10px;background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.42);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+      <div>
+        <div style="font-weight:700;font-size:13px;color:var(--accent);">
+          ${escapeHtml(t("update.banner_title", { latest: res.latest_version, current: res.current_version }))}
+        </div>
+        <div class="stat-sub" style="margin-top:2px;">
+          ${escapeHtml(t("update.banner_sub"))}
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <button class="btn btn-sm btn-primary" id="btn-banner-open-update">
+          ${t("update.banner_btn_view")}
+        </button>
+        <button class="btn btn-sm" id="btn-banner-skip-version">
+          ${escapeHtml(t("update.btn_keep_current", { latest: res.latest_version }))}
+        </button>
+        <button class="btn btn-sm" id="btn-banner-remind-later">
+          ${t("update.banner_btn_later")}
+        </button>
+      </div>
+    </div>
+  `;
+
+  const viewBtn = document.getElementById("btn-banner-open-update");
+  if (viewBtn) {
+    viewBtn.onclick = () => showAboutModalDialog();
+  }
+  const laterBtn = document.getElementById("btn-banner-remind-later");
+  if (laterBtn) {
+    laterBtn.onclick = () => {
+      dismissedUpdateBannerForSession = true;
+      hideUpdateNotificationBanner();
+    };
+  }
+  const skipBtn = document.getElementById("btn-banner-skip-version");
+  if (skipBtn) {
+    skipBtn.onclick = async () => {
+      const latestCfg = await api("get_input_config");
+      await api("update_input_config", {
+        ...latestCfg,
+        skipped_update_version: res.latest_version
+      });
+      dismissedUpdateBannerForSession = true;
+      hideUpdateNotificationBanner();
+      resetSidebarAboutButton();
+      showToast(t("update.toast_kept_current", { latest: res.latest_version }));
+    };
   }
 }
 
@@ -20,8 +86,8 @@ function renderKeepCurrentModeInModal(curVer) {
         ${escapeHtml(t("update.keep_current_mode_badge", { version: curVer }))}
       </span>
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-        <button class="btn btn-sm btn-primary" id="btn-reenable-auto-check">${t("update.btn_enable_checks")}</button>
-        <button class="btn btn-sm" id="btn-manual-check-once">${t("update.btn_check")}</button>
+        <button class="btn btn-sm btn-primary" id="btn-manual-check-once">${t("update.btn_check")}</button>
+        <button class="btn btn-sm" id="btn-reenable-auto-check">${t("update.btn_enable_checks")}</button>
       </div>
     </div>
   `;
@@ -62,10 +128,12 @@ async function runUpdateCheckInModal(forceManual = false) {
     return;
   }
 
-  box.innerHTML = `<div class="stat-sub">${t("update.checking")}</div>`;
-
-  const res = await api("check_for_updates");
-  cachedUpdateState = res;
+  let res = (!forceManual && cachedUpdateState && cachedUpdateState.ok) ? cachedUpdateState : null;
+  if (!res) {
+    box.innerHTML = `<div class="stat-sub">${t("update.checking")}</div>`;
+    res = await api("check_for_updates");
+    cachedUpdateState = res;
+  }
   if (!document.getElementById("about-update-status-box")) return;
 
   if (!res || !res.ok) {
@@ -92,11 +160,27 @@ async function runUpdateCheckInModal(forceManual = false) {
       ? t("update.skipped_badge", { latest: res.latest_version, current: res.current_version })
       : t("update.available_badge", { latest: res.latest_version, current: res.current_version }))}
           </span>
-          ${res.published_at ? `<span class="stat-sub">${escapeHtml(res.published_at)}</span>` : ""}
+          <div style="display:flex;align-items:center;gap:6px;">
+            ${res.published_at ? `<span class="stat-sub">${escapeHtml(res.published_at)}</span>` : ""}
+            <button class="btn btn-sm" id="btn-recheck-update-when-avail" style="padding:2px 7px;font-size:11px;">${t("update.btn_check")}</button>
+          </div>
         </div>
         ${notes ? `
           <div style="font-size:11.5px;color:var(--text-muted);background:var(--bg-card);border:1px solid var(--border);border-radius:7px;padding:7px 10px;max-height:85px;overflow-y:auto;white-space:pre-line;">${escapeHtml(notes)}</div>
         ` : ""}
+        <div id="update-confirm-box" style="display:none;padding:9px 11px;border-radius:8px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.45);">
+          <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--text-main);">
+            ${escapeHtml(t("update.confirm_prompt", { latest: res.latest_version }))}
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-sm btn-primary" id="btn-confirm-self-update">
+              ${t("update.btn_confirm_yes")}
+            </button>
+            <button class="btn btn-sm" id="btn-cancel-self-update">
+              ${t("update.btn_confirm_cancel")}
+            </button>
+          </div>
+        </div>
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;" id="update-action-buttons-row">
           <button class="btn btn-sm btn-primary" id="btn-perform-self-update">
             ${escapeHtml(t("update.btn_install_now", { latest: res.latest_version }))}
@@ -116,12 +200,35 @@ async function runUpdateCheckInModal(forceManual = false) {
       </div>
     `;
 
+    const recheckAvailBtn = document.getElementById("btn-recheck-update-when-avail");
+    if (recheckAvailBtn) {
+      recheckAvailBtn.onclick = () => runUpdateCheckInModal(true);
+    }
+
     const installBtn = document.getElementById("btn-perform-self-update");
-    if (installBtn) {
-      installBtn.onclick = async () => {
-        const row = document.getElementById("update-action-buttons-row");
-        if (row) {
-          row.innerHTML = `<span class="badge-ok">${escapeHtml(t("update.installing", { latest: res.latest_version }))}</span>`;
+    const confirmBox = document.getElementById("update-confirm-box");
+    const actionsRow = document.getElementById("update-action-buttons-row");
+    const confirmYesBtn = document.getElementById("btn-confirm-self-update");
+    const confirmCancelBtn = document.getElementById("btn-cancel-self-update");
+
+    if (installBtn && confirmBox && actionsRow) {
+      installBtn.onclick = () => {
+        actionsRow.style.display = "none";
+        confirmBox.style.display = "block";
+      };
+    }
+
+    if (confirmCancelBtn && confirmBox && actionsRow) {
+      confirmCancelBtn.onclick = () => {
+        confirmBox.style.display = "none";
+        actionsRow.style.display = "flex";
+      };
+    }
+
+    if (confirmYesBtn) {
+      confirmYesBtn.onclick = async () => {
+        if (confirmBox) {
+          confirmBox.innerHTML = `<span class="badge-ok">${escapeHtml(t("update.installing", { latest: res.latest_version }))}</span>`;
         }
         const updRes = await api("perform_self_update", {
           zip_url: res.zip_url,
@@ -147,9 +254,10 @@ async function runUpdateCheckInModal(forceManual = false) {
           ...latestCfg,
           skipped_update_version: res.latest_version
         });
+        hideUpdateNotificationBanner();
         resetSidebarAboutButton();
         showToast(t("update.toast_kept_current", { latest: res.latest_version }));
-        runUpdateCheckInModal(true);
+        runUpdateCheckInModal(false);
       };
     }
 
@@ -164,6 +272,7 @@ async function runUpdateCheckInModal(forceManual = false) {
         });
         const modalChk = document.getElementById("chk-modal-auto-update");
         if (modalChk) modalChk.checked = false;
+        hideUpdateNotificationBanner();
         resetSidebarAboutButton();
         showToast(t("update.toast_disabled_checks"));
         renderKeepCurrentModeInModal(res.current_version);
@@ -193,6 +302,7 @@ async function runUpdateCheckInModal(forceManual = false) {
         });
         const modalChk = document.getElementById("chk-modal-auto-update");
         if (modalChk) modalChk.checked = false;
+        hideUpdateNotificationBanner();
         resetSidebarAboutButton();
         showToast(t("update.toast_disabled_checks"));
         renderKeepCurrentModeInModal(res.current_version);
@@ -201,7 +311,7 @@ async function runUpdateCheckInModal(forceManual = false) {
   }
 }
 
-function showAboutModalDialog() {
+function showAboutModalDialog(forceManualCheck = false) {
   const existing = document.getElementById("about-modal-backdrop");
   if (existing) {
     existing.remove();
@@ -307,6 +417,7 @@ function showAboutModalDialog() {
         showToast(t("update.toast_enabled_checks"));
         runUpdateCheckInModal(true);
       } else {
+        hideUpdateNotificationBanner();
         resetSidebarAboutButton();
         showToast(t("update.toast_disabled_checks"));
         renderKeepCurrentModeInModal(curVer);
@@ -314,7 +425,7 @@ function showAboutModalDialog() {
     };
   }
 
-  runUpdateCheckInModal(false);
+  runUpdateCheckInModal(!!forceManualCheck);
 }
 
 window.__showAboutModal = showAboutModalDialog;
@@ -380,7 +491,10 @@ async function initMainDashboard() {
           </div>
         </aside>
 
-        <main class="content-area" id="main-view"></main>
+        <main class="content-area">
+          <div id="update-notify-banner" style="display:none;"></div>
+          <div id="main-view"></div>
+        </main>
       </div>
     `;
 
@@ -402,6 +516,15 @@ async function initMainDashboard() {
         renderActiveTab();
       });
     });
+
+    if (cachedUpdateState && cachedUpdateState.ok && cachedUpdateState.has_update && !dismissedUpdateBannerForSession) {
+      renderUpdateNotificationBanner(cachedUpdateState);
+      const aboutBtn = document.getElementById("btn-sidebar-about");
+      if (aboutBtn) {
+        aboutBtn.classList.add("btn-primary");
+        aboutBtn.textContent = `🔔 v${cachedUpdateState.latest_version}`;
+      }
+    }
   }
 
   async function renderActiveTab() {
@@ -480,7 +603,7 @@ async function initMainDashboard() {
   renderShell();
   renderActiveTab();
 
-  // Silent background update check 3.5s after launch (only when auto_check_updates is enabled)
+  // Silent background check 3.5s after launch: ONLY notifies user (never updates automatically)
   setTimeout(async () => {
     try {
       const cfg = await api("get_input_config");
@@ -493,11 +616,12 @@ async function initMainDashboard() {
         if (cfg && cfg.skipped_update_version === res.latest_version) {
           return;
         }
+        renderUpdateNotificationBanner(res);
         showToast(t("update.toast_new_version", { latest: res.latest_version }));
         const aboutBtn = document.getElementById("btn-sidebar-about");
         if (aboutBtn) {
           aboutBtn.classList.add("btn-primary");
-          aboutBtn.textContent = `🎉 v${res.latest_version}`;
+          aboutBtn.textContent = `🔔 v${res.latest_version}`;
         }
       }
     } catch (_e) {

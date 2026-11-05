@@ -602,7 +602,7 @@ async function renderUnifiedSettingsScreen(view) {
   if (checkUpdSettingsBtn) {
     checkUpdSettingsBtn.onclick = () => {
       if (typeof window.__showAboutModal === "function") {
-        window.__showAboutModal();
+        window.__showAboutModal(true);
       }
     };
   }
