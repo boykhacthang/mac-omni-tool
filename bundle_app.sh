@@ -38,9 +38,9 @@ cat > "$APP_DIR/Contents/Info.plist" << 'EOF'
     <key>CFBundleIdentifier</key>
     <string>com.khacthang.mac-omni-tool</string>
     <key>CFBundleVersion</key>
-    <string>2.1.1</string>
+    <string>2.1.2</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.1.1</string>
+    <string>2.1.2</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 boykhacthang • MIT License • github.com/boykhacthang/mac-omni-tool</string>
     <key>CFBundlePackageType</key>

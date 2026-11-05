@@ -3,7 +3,7 @@
 > 🌐 **Language / Ngôn ngữ**: [🇬🇧 English](README.md) | **[🇻🇳 Tiếng Việt](README.vi.md)**
 
 [![Edition](https://img.shields.io/badge/Phiên_bản-Free_Community-10b981?style=flat-square)](#)
-[![Version](https://img.shields.io/badge/Version-2.1.1-3b82f6?style=flat-square)](#)
+[![Version](https://img.shields.io/badge/Version-2.1.2-3b82f6?style=flat-square)](#)
 [![License: MIT](https://img.shields.io/badge/Giấy_phép-MIT-f59e0b?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/macOS-Apple_Silicon_%26_Intel-000000?style=flat-square&logo=apple)](#)
 [![Built with Rust](https://img.shields.io/badge/Ngôn_ngữ-Rust-dea584?style=flat-square&logo=rust)](#)
@@ -20,10 +20,10 @@ Người dùng chỉ cần tải trực tiếp bộ cài **`.dmg`** hoặc **`.z
 
 | Phiên bản | Trạng thái | 💿 Bộ cài `.dmg` chuẩn macOS | 🗜️ Bản nén `.zip` gọn nhẹ | 📋 Trang Release |
 | :--- | :--- | :--- | :--- | :--- |
-| **v2.1.1** | 🌟 **Mới nhất (Khuyên dùng)** | [**⬇️ Tải `MacOmniTool-v2.1.1-Installer.dmg` (3.2 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.1.1/MacOmniTool-v2.1.1-Installer.dmg) | [**⬇️ Tải `MacOmniTool-v2.1.1-macOS.zip` (2.7 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.1.1/MacOmniTool-v2.1.1-macOS.zip) | [GitHub Release v2.1.1](https://github.com/boykhacthang/mac-omni-tool/releases/tag/v2.1.1) |
+| **v2.1.2** | 🌟 **Mới nhất (Khuyên dùng)** | [**⬇️ Tải `MacOmniTool-v2.1.2-Installer.dmg` (3.2 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.1.2/MacOmniTool-v2.1.2-Installer.dmg) | [**⬇️ Tải `MacOmniTool-v2.1.2-macOS.zip` (2.7 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.1.2/MacOmniTool-v2.1.2-macOS.zip) | [GitHub Release v2.1.2](https://github.com/boykhacthang/mac-omni-tool/releases/tag/v2.1.2) |
 
 ### ⚡ Hướng dẫn Cài đặt Nhanh (30 Giây)
-1. Tải file **`MacOmniTool-v2.1.1-Installer.dmg`** ở bảng trên và mở lên.
+1. Tải file **`MacOmniTool-v2.1.2-Installer.dmg`** ở bảng trên và mở lên.
 2. Kéo **`MacOmniTool.app`** thả vào thư mục **`Applications`**.
 3. **Mở khóa lần đầu trên máy Mac mới**: Vì đây là bản cộng đồng miễn phí không thu phí chứng chỉ Apple Developer (\$99/năm), ở lần mở đầu tiên bạn chỉ cần bấm đúp vào file **`Mo-Khoa-App-Tren-May-Moi.command`** có sẵn trong `.dmg` (hoặc chạy lệnh sau trong Terminal):
    ```bash
@@ -39,7 +39,7 @@ Người dùng chỉ cần tải trực tiếp bộ cài **`.dmg`** hoặc **`.z
     ```bash
     ./publish_release.sh 2.1.0 "Mô tả các tính năng mới của bản 2.1.0"
     ```
-  - Script sẽ tự động nâng version trong `Cargo.toml`, build bản Release tối ưu, đóng gói `.dmg` & `.zip` vào `releases/v2.1.0/`, tính mã SHA-256, cập nhật `releases/latest.json`, tạo Git Tag `v2.1.0` và đẩy thẳng lên GitHub để mọi máy client nhận thông báo cập nhật ngay lập tức.
+  - Script sẽ tự động nâng version trong `Cargo.toml`, build bản Release tối ưu, đóng gói `.dmg` & `.zip` vào `releases/v2.1.2/`, tính mã SHA-256, cập nhật `releases/latest.json`, tạo Git Tag `v2.1.2` và đẩy thẳng lên GitHub để mọi máy client nhận thông báo cập nhật ngay lập tức.
 
 ---
 
@@ -101,7 +101,7 @@ Phiên bản 2.0 tái cấu trúc toàn diện theo chuẩn Rust chuyên nghiệ
 
 ```text
 mac-omni-tool/
-├── Cargo.toml                      # Cấu hình Cargo Workspace (v2.0.0, MIT License)
+├── Cargo.toml                      # Cấu hình Cargo Workspace (v2.1.2, MIT License)
 ├── LICENSE                         # Giấy phép Mã nguồn mở MIT (Copyright (c) 2026 khacthang)
 ├── .github/FUNDING.yml             # Cấu hình nút Sponsor / Ko-fi trên GitHub
 ├── build_installer_dmg.sh          # Script đóng gói MacOmniTool.app, .dmg & .zip
