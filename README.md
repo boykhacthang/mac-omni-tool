@@ -3,7 +3,7 @@
 > 🌐 **Language / Ngôn ngữ**: **[🇬🇧 English](README.md)** | [🇻🇳 Tiếng Việt](README.vi.md)
 
 [![Edition](https://img.shields.io/badge/Edition-Free_Community-10b981?style=flat-square)](#)
-[![Version](https://img.shields.io/badge/Version-2.1.2-3b82f6?style=flat-square)](#)
+[![Version](https://img.shields.io/badge/Version-2.2.0-3b82f6?style=flat-square)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f59e0b?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/macOS-Apple_Silicon_%26_Intel-000000?style=flat-square&logo=apple)](#)
 [![Built with Rust](https://img.shields.io/badge/Built_with-Rust-dea584?style=flat-square&logo=rust)](#)
@@ -20,10 +20,10 @@ You can download the pre-built **`.dmg` Installer** or **`.zip` App Bundle** dir
 
 | Version | Status | 💿 macOS `.dmg` Installer | 🗜️ macOS `.zip` Portable | 📋 Release Page |
 | :--- | :--- | :--- | :--- | :--- |
-| **v2.1.2** | 🌟 **Latest Stable** | [**⬇️ Download `MacOmniTool-v2.1.2-Installer.dmg` (3.2 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.1.2/MacOmniTool-v2.1.2-Installer.dmg) | [**⬇️ Download `MacOmniTool-v2.1.2-macOS.zip` (2.7 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.1.2/MacOmniTool-v2.1.2-macOS.zip) | [GitHub Release v2.1.2](https://github.com/boykhacthang/mac-omni-tool/releases/tag/v2.1.2) |
+| **v2.2.0** | 🌟 **Latest Stable** | [**⬇️ Download `MacOmniTool-v2.2.0-Installer.dmg` (3.2 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.2.0/MacOmniTool-v2.2.0-Installer.dmg) | [**⬇️ Download `MacOmniTool-v2.2.0-macOS.zip` (2.7 MB)**](https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.2.0/MacOmniTool-v2.2.0-macOS.zip) | [GitHub Release v2.2.0](https://github.com/boykhacthang/mac-omni-tool/releases/tag/v2.2.0) |
 
 ### ⚡ Quick Installation Steps (30 Seconds)
-1. Download **`MacOmniTool-v2.1.2-Installer.dmg`** above and double-click to open it.
+1. Download **`MacOmniTool-v2.2.0-Installer.dmg`** above and double-click to open it.
 2. Drag **`MacOmniTool.app`** into the **`Applications`** folder.
 3. **First Launch on a New Mac (Gatekeeper Bypass)**: Because this is a free community open-source app without a paid \$99/year Apple Developer notarization certificate, double-click **`Mo-Khoa-App-Tren-May-Moi.command`** inside the `.dmg` (or run the command below in Terminal once):
    ```bash
@@ -39,7 +39,7 @@ You can download the pre-built **`.dmg` Installer** or **`.zip` App Bundle** dir
     ```bash
     ./publish_release.sh 2.1.0 "Added new features and bug fixes"
     ```
-  - This single command automatically updates `Cargo.toml`, compiles the release `.app`, packages the `.dmg` & `.zip` into `releases/v2.1.2/`, computes SHA-256 hashes, updates `releases/latest.json`, commits, tags `v2.1.2`, and pushes everything to GitHub so all client machines receive the update notification immediately.
+  - This single command automatically updates `Cargo.toml`, compiles the release `.app`, packages the `.dmg` & `.zip` into `releases/v2.2.0/`, computes SHA-256 hashes, updates `releases/latest.json`, commits, tags `v2.2.0`, and pushes everything to GitHub so all client machines receive the update notification immediately.
 
 ---
 
@@ -101,7 +101,7 @@ Version 2.0 is a complete architectural and feature upgrade engineered for produ
 
 ```text
 mac-omni-tool/
-├── Cargo.toml                      # Rust Workspace configuration (v2.1.2, MIT License)
+├── Cargo.toml                      # Rust Workspace configuration (v2.2.0, MIT License)
 ├── LICENSE                         # MIT Open-Source License (Copyright (c) 2026 khacthang)
 ├── .github/FUNDING.yml             # GitHub Sponsors & Ko-fi configuration
 ├── build_installer_dmg.sh          # Release bundler for MacOmniTool.app, .dmg & .zip

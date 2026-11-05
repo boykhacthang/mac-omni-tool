@@ -3,9 +3,25 @@ use tao::platform::macos::WindowExtMacOS;
 
 const APP_ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
 
+/// NSWindowCollectionBehaviorCanJoinAllSpaces (1 << 0)
+/// | NSWindowCollectionBehaviorStationary (1 << 4)
+/// | NSWindowCollectionBehaviorIgnoresCycle (1 << 6)
+/// | NSWindowCollectionBehaviorFullScreenAuxiliary (1 << 8)
+/// | NSWindowCollectionBehaviorFullScreenDisallowsTiling (1 << 12)
+/// | NSWindowCollectionBehaviorCanJoinAllApplications (1 << 18)
+const OVERLAY_FULLSCREEN_COLLECTION_BEHAVIOR: isize =
+    (1 << 0) | (1 << 4) | (1 << 6) | (1 << 8) | (1 << 12) | (1 << 18);
+
+/// Window level 2000 (above NSScreenSaverWindowLevel = 1000, Full Screen Spaces, Menu Bar, and Dock)
+const OVERLAY_SCREENSHOT_WINDOW_LEVEL: isize = 2000;
+
+/// NSPopUpMenuWindowLevel = 101 (renders floating popovers/drawers above Full Screen Spaces)
+const OVERLAY_POPUP_WINDOW_LEVEL: isize = 101;
+
 #[link(name = "objc")]
 extern "C" {
     pub fn objc_getClass(name: *const c_char) -> *mut c_void;
+    pub fn object_getClass(obj: *mut c_void) -> *mut c_void;
     pub fn objc_allocateClassPair(
         superclass: *mut c_void,
         name: *const c_char,
@@ -18,10 +34,171 @@ extern "C" {
         imp: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void),
         types: *const c_char,
     ) -> bool;
+    pub fn class_replaceMethod(
+        cls: *mut c_void,
+        name: *mut c_void,
+        imp: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> bool,
+        types: *const c_char,
+    ) -> *mut c_void;
     pub fn sel_registerName(name: *const c_char) -> *mut c_void;
     pub fn objc_msgSend();
     pub fn objc_autoreleasePoolPush() -> *mut c_void;
     pub fn objc_autoreleasePoolPop(pool: *mut c_void);
+}
+
+unsafe fn is_borderless_overlay_nswindow(this: *mut c_void) -> bool {
+    if this.is_null() {
+        return false;
+    }
+    type MsgStyleMask = unsafe extern "C" fn(*mut c_void, *mut c_void) -> usize;
+    let msg_style: MsgStyleMask = std::mem::transmute(objc_msgSend as *const c_void);
+    let mask = msg_style(this, sel_registerName(c"styleMask".as_ptr()));
+    // NSWindowStyleMaskTitled = 1 << 0.
+    // `main_window` is titled (mask & 1 != 0); all overlay windows are borderless (mask & 1 == 0).
+    (mask & 1) == 0
+}
+
+unsafe extern "C" fn tao_is_nonactivating_panel_imp(this: *mut c_void, _sel: *mut c_void) -> bool {
+    is_borderless_overlay_nswindow(this)
+}
+
+unsafe extern "C" fn tao_can_become_main_window_imp(this: *mut c_void, _sel: *mut c_void) -> bool {
+    !is_borderless_overlay_nswindow(this)
+}
+
+/// Configure `TaoWindow` (`NSWindow`) so borderless overlay windows return `YES`
+/// for `_isNonactivatingPanel`, `isFloatingPanel`, and `worksWhenModal`, and `NO` for `canBecomeMainWindow`,
+/// without changing `TaoWindow`'s class hierarchy (`superclass` stays `NSWindow`).
+///
+/// In macOS AppKit (`-[NSWindow _allowedInOtherAppsFullScreenSpaceWithCollectionBehavior:]`),
+/// windows belonging to a non-background-only app are forbidden from joining another app's
+/// Full Screen Space (`_NSSetWindowAllowedOnSpecialSpaces` = 0) unless `[window _isNonactivatingPanel]`
+/// returns `YES` and `FullScreenAuxiliary | CanJoinAllApplications` is set.
+unsafe fn promote_to_nonactivating_overlay_panel(ns_win: *mut c_void) {
+    if ns_win.is_null() {
+        return;
+    }
+    let cur_cls = object_getClass(ns_win);
+    if cur_cls.is_null() {
+        return;
+    }
+
+    static SWIZZLED: std::sync::Once = std::sync::Once::new();
+    SWIZZLED.call_once(|| {
+        type ReplaceBoolNoArg = unsafe extern "C" fn(
+            *mut c_void,
+            *mut c_void,
+            unsafe extern "C" fn(*mut c_void, *mut c_void) -> bool,
+            *const c_char,
+        ) -> *mut c_void;
+        let replace_bool: ReplaceBoolNoArg =
+            std::mem::transmute(class_replaceMethod as *const c_void);
+
+        let _ = replace_bool(
+            cur_cls,
+            sel_registerName(c"_isNonactivatingPanel".as_ptr()),
+            tao_is_nonactivating_panel_imp,
+            c"B@:".as_ptr(),
+        );
+        let _ = replace_bool(
+            cur_cls,
+            sel_registerName(c"isFloatingPanel".as_ptr()),
+            tao_is_nonactivating_panel_imp,
+            c"B@:".as_ptr(),
+        );
+        let _ = replace_bool(
+            cur_cls,
+            sel_registerName(c"worksWhenModal".as_ptr()),
+            tao_is_nonactivating_panel_imp,
+            c"B@:".as_ptr(),
+        );
+        let _ = replace_bool(
+            cur_cls,
+            sel_registerName(c"canBecomeMainWindow".as_ptr()),
+            tao_can_become_main_window_imp,
+            c"B@:".as_ptr(),
+        );
+    });
+
+    type Msg1Isize = unsafe extern "C" fn(*mut c_void, *mut c_void, isize);
+    type MsgGetIsize = unsafe extern "C" fn(*mut c_void, *mut c_void) -> isize;
+    type Msg1Bool = unsafe extern "C" fn(*mut c_void, *mut c_void, bool);
+    let msg1_isize: Msg1Isize = std::mem::transmute(objc_msgSend as *const c_void);
+    let msg_get_isize: MsgGetIsize = std::mem::transmute(objc_msgSend as *const c_void);
+    let msg1_bool: Msg1Bool = std::mem::transmute(objc_msgSend as *const c_void);
+    let sel_coll = sel_registerName(c"setCollectionBehavior:".as_ptr());
+    let sel_get_coll = sel_registerName(c"collectionBehavior".as_ptr());
+
+    msg1_bool(
+        ns_win,
+        sel_registerName(c"setCanBecomeVisibleWithoutLogin:".as_ptr()),
+        true,
+    );
+    if msg_get_isize(ns_win, sel_get_coll) != OVERLAY_FULLSCREEN_COLLECTION_BEHAVIOR {
+        msg1_isize(ns_win, sel_coll, 0);
+        msg1_isize(ns_win, sel_coll, OVERLAY_FULLSCREEN_COLLECTION_BEHAVIOR);
+    }
+}
+
+unsafe extern "C" fn accepts_first_mouse_imp(
+    _this: *mut c_void,
+    _sel: *mut c_void,
+    _event: *mut c_void,
+) -> bool {
+    true
+}
+
+/// Enable `acceptsFirstMouse:` on the window's `contentView` and all its `WKWebView` subviews
+/// so clicking on a secondary monitor's overlay window selects or drags on the 1st click instead of requiring 2 clicks.
+pub unsafe fn enable_overlay_accepts_first_mouse(window: &tao::window::Window) {
+    let pool = objc_autoreleasePoolPush();
+    let ns_win = window.ns_window();
+    if !ns_win.is_null() {
+        type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+        type MsgCount = unsafe extern "C" fn(*mut c_void, *mut c_void) -> usize;
+        type MsgAtIdx = unsafe extern "C" fn(*mut c_void, *mut c_void, usize) -> *mut c_void;
+
+        let msg0: Msg0 = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg_count: MsgCount = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg_at_idx: MsgAtIdx = std::mem::transmute(objc_msgSend as *const c_void);
+
+        let sel_accepts = sel_registerName(c"acceptsFirstMouse:".as_ptr());
+        let content_view = msg0(ns_win, sel_registerName(c"contentView".as_ptr()));
+        if !content_view.is_null() {
+            let cv_cls = object_getClass(content_view);
+            if !cv_cls.is_null() {
+                let _ = class_replaceMethod(
+                    cv_cls,
+                    sel_accepts,
+                    accepts_first_mouse_imp,
+                    c"B@:@".as_ptr(),
+                );
+            }
+            let subviews = msg0(content_view, sel_registerName(c"subviews".as_ptr()));
+            if !subviews.is_null() {
+                let count = msg_count(subviews, sel_registerName(c"count".as_ptr()));
+                for i in 0..count {
+                    let sub = msg_at_idx(
+                        subviews,
+                        sel_registerName(c"objectAtIndex:".as_ptr()),
+                        i,
+                    );
+                    if !sub.is_null() {
+                        let sub_cls = object_getClass(sub);
+                        if !sub_cls.is_null() {
+                            let _ = class_replaceMethod(
+                                sub_cls,
+                                sel_accepts,
+                                accepts_first_mouse_imp,
+                                c"B@:@".as_ptr(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    objc_autoreleasePoolPop(pool);
 }
 
 /// Apply the embedded minimalist AppIcon directly to the macOS Dock & Cmd+Tab switcher
@@ -174,6 +351,7 @@ pub unsafe fn set_nswindow_rounded_transparent(window: &tao::window::Window, cor
         let msg1_ptr: Msg1Ptr = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_f64: Msg1F64 = std::mem::transmute(objc_msgSend as *const c_void);
 
+        promote_to_nonactivating_overlay_panel(ns_win);
         msg1_bool(
             ns_win,
             sel_registerName(c"setRestorable:".as_ptr()),
@@ -227,9 +405,10 @@ pub unsafe fn set_nswindow_rounded_transparent(window: &tao::window::Window, cor
     objc_autoreleasePoolPop(pool);
 }
 
-/// Safely hide an overlay window, zero its opacity, lower its level, move its frame offscreen (`1x1` at `-30000,-30000`),
+/// Safely hide an overlay window, zero its opacity, lower its level,
 /// and make it ignore all mouse events so a hidden overlay window can NEVER intercept clicks, flash stale frames,
-/// or freeze the screen on any Space.
+/// or freeze the screen on any Space, while preserving its full display size so WKWebView never has to reallocate
+/// its GPU CAMetalLayer backing store from 1x1 on the next screenshot.
 pub unsafe fn park_overlay_window_offscreen(window: &tao::window::Window) {
     let pool = objc_autoreleasePoolPush();
     let ns_win = window.ns_window();
@@ -238,20 +417,18 @@ pub unsafe fn park_overlay_window_offscreen(window: &tao::window::Window) {
         type Msg1Isize = unsafe extern "C" fn(*mut c_void, *mut c_void, isize);
         type Msg1F64 = unsafe extern "C" fn(*mut c_void, *mut c_void, f64);
         type Msg1Ptr = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
-        type MsgSetFrame =
-            unsafe extern "C" fn(*mut c_void, *mut c_void, CocoaRect, bool, bool);
 
         let msg1_bool: Msg1Bool = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_isize: Msg1Isize = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_f64: Msg1F64 = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_ptr: Msg1Ptr = std::mem::transmute(objc_msgSend as *const c_void);
-        let msg_set_frame: MsgSetFrame = std::mem::transmute(objc_msgSend as *const c_void);
 
         msg1_isize(
             ns_win,
             sel_registerName(c"setAnimationBehavior:".as_ptr()),
             2,
         );
+        promote_to_nonactivating_overlay_panel(ns_win);
         msg1_bool(
             ns_win,
             sel_registerName(c"setRestorable:".as_ptr()),
@@ -265,23 +442,6 @@ pub unsafe fn park_overlay_window_offscreen(window: &tao::window::Window) {
         msg1_f64(ns_win, sel_registerName(c"setAlphaValue:".as_ptr()), 0.0);
         // NSNormalWindowLevel = 0
         msg1_isize(ns_win, sel_registerName(c"setLevel:".as_ptr()), 0);
-        let offscreen_rect = CocoaRect {
-            origin: CocoaPoint {
-                x: -30000.0,
-                y: -30000.0,
-            },
-            size: CocoaSize {
-                width: 1.0,
-                height: 1.0,
-            },
-        };
-        msg_set_frame(
-            ns_win,
-            sel_registerName(c"setFrame:display:animate:".as_ptr()),
-            offscreen_rect,
-            false,
-            false,
-        );
         msg1_ptr(
             ns_win,
             sel_registerName(c"orderOut:".as_ptr()),
@@ -289,7 +449,6 @@ pub unsafe fn park_overlay_window_offscreen(window: &tao::window::Window) {
         );
     }
     objc_autoreleasePoolPop(pool);
-    window.set_visible(false);
 }
 
 /// Safely hide a floating popup/drawer window (`mini_window`, `clip_window`, `alttab_window`)
@@ -330,11 +489,29 @@ pub unsafe fn show_floating_overlay_window(window: &tao::window::Window, corner_
     let ns_win = window.ns_window();
     if !ns_win.is_null() {
         type Msg1Bool = unsafe extern "C" fn(*mut c_void, *mut c_void, bool);
+        type Msg1Isize = unsafe extern "C" fn(*mut c_void, *mut c_void, isize);
         type Msg1F64 = unsafe extern "C" fn(*mut c_void, *mut c_void, f64);
 
         let msg1_bool: Msg1Bool = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_isize: Msg1Isize = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_f64: Msg1F64 = std::mem::transmute(objc_msgSend as *const c_void);
 
+        promote_to_nonactivating_overlay_panel(ns_win);
+        msg1_bool(
+            ns_win,
+            sel_registerName(c"setHidesOnDeactivate:".as_ptr()),
+            false,
+        );
+        msg1_isize(
+            ns_win,
+            sel_registerName(c"setCollectionBehavior:".as_ptr()),
+            OVERLAY_FULLSCREEN_COLLECTION_BEHAVIOR,
+        );
+        msg1_isize(
+            ns_win,
+            sel_registerName(c"setLevel:".as_ptr()),
+            OVERLAY_POPUP_WINDOW_LEVEL,
+        );
         msg1_bool(
             ns_win,
             sel_registerName(c"setIgnoresMouseEvents:".as_ptr()),
@@ -429,13 +606,20 @@ pub unsafe fn place_overlay_on_display(
             },
         };
 
-        msg_set_frame(
-            ns_win,
-            sel_registerName(c"setFrame:display:animate:".as_ptr()),
-            rect,
-            true,
-            false,
-        );
+        let cur = msg_rect(ns_win, sel_registerName(c"frame".as_ptr()));
+        let needs_resize = (cur.origin.x - rect.origin.x).abs() > 0.5
+            || (cur.origin.y - rect.origin.y).abs() > 0.5
+            || (cur.size.width - rect.size.width).abs() > 0.5
+            || (cur.size.height - rect.size.height).abs() > 0.5;
+        if needs_resize {
+            msg_set_frame(
+                ns_win,
+                sel_registerName(c"setFrame:display:animate:".as_ptr()),
+                rect,
+                false,
+                false,
+            );
+        }
     }
     objc_autoreleasePoolPop(pool);
 }
@@ -463,6 +647,7 @@ pub unsafe fn prepare_screenshot_window_hidden(
         let msg1_isize: Msg1Isize = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_f64: Msg1F64 = std::mem::transmute(objc_msgSend as *const c_void);
 
+        promote_to_nonactivating_overlay_panel(ns_win);
         msg1_bool(
             ns_win,
             sel_registerName(c"setRestorable:".as_ptr()),
@@ -471,6 +656,11 @@ pub unsafe fn prepare_screenshot_window_hidden(
         msg1_bool(
             ns_win,
             sel_registerName(c"setHasShadow:".as_ptr()),
+            false,
+        );
+        msg1_bool(
+            ns_win,
+            sel_registerName(c"setHidesOnDeactivate:".as_ptr()),
             false,
         );
         // NSWindowAnimationBehaviorNone = 2
@@ -484,19 +674,23 @@ pub unsafe fn prepare_screenshot_window_hidden(
             sel_registerName(c"setIgnoresMouseEvents:".as_ptr()),
             true,
         );
-        // NSWindowCollectionBehaviorMoveToActiveSpace (1 << 1) | NSWindowCollectionBehaviorTransient (1 << 3) = 10
+        // MoveToActiveSpace | Transient | FullScreenAuxiliary (266)
         msg1_isize(
             ns_win,
             sel_registerName(c"setCollectionBehavior:".as_ptr()),
-            10,
+            OVERLAY_FULLSCREEN_COLLECTION_BEHAVIOR,
         );
         // 0.004 < 1/255 is completely invisible on screen, while keeping WindowServer occlusion
-        // state visible so WKWebView renders requestAnimationFrame + CAMetalLayer immediately.
+        // state visible at target level so WKWebView renders requestAnimationFrame + CAMetalLayer immediately.
         msg1_f64(ns_win, sel_registerName(c"setAlphaValue:".as_ptr()), 0.004);
-        // Keep NSNormalWindowLevel = 0 until reveal_screenshot_window is called
-        msg1_isize(ns_win, sel_registerName(c"setLevel:".as_ptr()), 0);
+        msg1_isize(
+            ns_win,
+            sel_registerName(c"setLevel:".as_ptr()),
+            OVERLAY_SCREENSHOT_WINDOW_LEVEL,
+        );
 
         place_overlay_on_display(window, disp_x, disp_y, disp_w, disp_h);
+        enable_overlay_accepts_first_mouse(window);
         let _ = msg0(ns_win, sel_registerName(c"orderFrontRegardless".as_ptr()));
     }
     objc_autoreleasePoolPop(pool);
@@ -504,7 +698,7 @@ pub unsafe fn prepare_screenshot_window_hidden(
 
 /// Atomically reveal an already-positioned and GPU-composited screenshot overlay window (`alpha = 1.0`).
 pub unsafe fn reveal_screenshot_window(window: &tao::window::Window, make_key: bool) {
-    window.set_visible(true);
+    enable_overlay_accepts_first_mouse(window);
     let pool = objc_autoreleasePoolPush();
     type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
     type Msg1Bool = unsafe extern "C" fn(*mut c_void, *mut c_void, bool);
@@ -520,6 +714,12 @@ pub unsafe fn reveal_screenshot_window(window: &tao::window::Window, make_key: b
 
     let ns_win = window.ns_window();
     if !ns_win.is_null() {
+        promote_to_nonactivating_overlay_panel(ns_win);
+        msg1_bool(
+            ns_win,
+            sel_registerName(c"setHidesOnDeactivate:".as_ptr()),
+            false,
+        );
         msg1_isize(
             ns_win,
             sel_registerName(c"setAnimationBehavior:".as_ptr()),
@@ -528,9 +728,13 @@ pub unsafe fn reveal_screenshot_window(window: &tao::window::Window, make_key: b
         msg1_isize(
             ns_win,
             sel_registerName(c"setCollectionBehavior:".as_ptr()),
-            10,
+            OVERLAY_FULLSCREEN_COLLECTION_BEHAVIOR,
         );
-        msg1_isize(ns_win, sel_registerName(c"setLevel:".as_ptr()), 25);
+        msg1_isize(
+            ns_win,
+            sel_registerName(c"setLevel:".as_ptr()),
+            OVERLAY_SCREENSHOT_WINDOW_LEVEL,
+        );
         msg1_bool(
             ns_win,
             sel_registerName(c"setIgnoresMouseEvents:".as_ptr()),
@@ -542,6 +746,7 @@ pub unsafe fn reveal_screenshot_window(window: &tao::window::Window, make_key: b
             true,
         );
         msg1_f64(ns_win, sel_registerName(c"setAlphaValue:".as_ptr()), 1.0);
+        let _ = msg0(ns_win, sel_registerName(c"orderFrontRegardless".as_ptr()));
 
         if make_key {
             let ns_app_cls = objc_getClass(c"NSApplication".as_ptr());
@@ -560,8 +765,6 @@ pub unsafe fn reveal_screenshot_window(window: &tao::window::Window, make_key: b
                 sel_registerName(c"makeKeyAndOrderFront:".as_ptr()),
                 std::ptr::null_mut(),
             );
-        } else {
-            let _ = msg0(ns_win, sel_registerName(c"orderFrontRegardless".as_ptr()));
         }
     }
     objc_autoreleasePoolPop(pool);
@@ -632,6 +835,51 @@ pub unsafe fn focus_and_elevate_macos_window(
     let msg1_f64: Msg1F64 = std::mem::transmute(objc_msgSend as *const c_void);
     let msg1_ptr: Msg1Ptr = std::mem::transmute(objc_msgSend as *const c_void);
 
+    let ns_win = window.ns_window();
+    if !ns_win.is_null() {
+        promote_to_nonactivating_overlay_panel(ns_win);
+        msg1_bool(
+            ns_win,
+            sel_registerName(c"setRestorable:".as_ptr()),
+            false,
+        );
+        msg1_bool(
+            ns_win,
+            sel_registerName(c"setHidesOnDeactivate:".as_ptr()),
+            false,
+        );
+        msg1_isize(
+            ns_win,
+            sel_registerName(c"setCollectionBehavior:".as_ptr()),
+            OVERLAY_FULLSCREEN_COLLECTION_BEHAVIOR,
+        );
+        msg1_bool(
+            ns_win,
+            sel_registerName(c"setIgnoresMouseEvents:".as_ptr()),
+            false,
+        );
+        msg1_f64(ns_win, sel_registerName(c"setAlphaValue:".as_ptr()), 1.0);
+        let level = if above_menubar {
+            OVERLAY_SCREENSHOT_WINDOW_LEVEL
+        } else {
+            OVERLAY_POPUP_WINDOW_LEVEL
+        };
+        msg1_isize(ns_win, sel_registerName(c"setLevel:".as_ptr()), level);
+        msg1_bool(
+            ns_win,
+            sel_registerName(c"setAcceptsMouseMovedEvents:".as_ptr()),
+            true,
+        );
+        let _ = msg0(ns_win, sel_registerName(c"orderFrontRegardless".as_ptr()));
+        if make_key {
+            msg1_ptr(
+                ns_win,
+                sel_registerName(c"makeKeyAndOrderFront:".as_ptr()),
+                std::ptr::null_mut(),
+            );
+        }
+    }
+
     let ns_app_cls = objc_getClass(c"NSApplication".as_ptr());
     if !ns_app_cls.is_null() {
         let ns_app = msg0(ns_app_cls, sel_registerName(c"sharedApplication".as_ptr()));
@@ -641,39 +889,6 @@ pub unsafe fn focus_and_elevate_macos_window(
                 sel_registerName(c"activateIgnoringOtherApps:".as_ptr()),
                 true,
             );
-        }
-    }
-
-    let ns_win = window.ns_window();
-    if !ns_win.is_null() {
-        msg1_bool(
-            ns_win,
-            sel_registerName(c"setRestorable:".as_ptr()),
-            false,
-        );
-        msg1_bool(
-            ns_win,
-            sel_registerName(c"setIgnoresMouseEvents:".as_ptr()),
-            false,
-        );
-        msg1_f64(ns_win, sel_registerName(c"setAlphaValue:".as_ptr()), 1.0);
-        if above_menubar {
-            // NSStatusWindowLevel = 25 (covers Menu Bar & Dock for fullscreen screenshot selection)
-            msg1_isize(ns_win, sel_registerName(c"setLevel:".as_ptr()), 25);
-        }
-        msg1_bool(
-            ns_win,
-            sel_registerName(c"setAcceptsMouseMovedEvents:".as_ptr()),
-            true,
-        );
-        if make_key {
-            msg1_ptr(
-                ns_win,
-                sel_registerName(c"makeKeyAndOrderFront:".as_ptr()),
-                std::ptr::null_mut(),
-            );
-        } else {
-            let _ = msg0(ns_win, sel_registerName(c"orderFrontRegardless".as_ptr()));
         }
     }
 

@@ -11,10 +11,10 @@ use crate::events::{screenshot_session, AppUserEvent, ScreenshotSlotData, MAX_SC
 use crate::macos_window::{
     disable_macos_window_restoration, focus_and_elevate_macos_window,
     hide_floating_overlay_window, is_any_nswindow_focused, park_overlay_window_offscreen,
-    place_main_window_center_75_full_height, prepare_screenshot_window_hidden,
-    restore_previous_frontmost_app, reveal_screenshot_window, set_macos_dock_icon_visible,
-    set_nswindow_non_restorable, set_nswindow_rounded_transparent, show_floating_overlay_window,
-    snap_nswindow_directly,
+    place_main_window_center_75_full_height, place_overlay_on_display,
+    prepare_screenshot_window_hidden, restore_previous_frontmost_app, reveal_screenshot_window,
+    set_macos_dock_icon_visible, set_nswindow_non_restorable, set_nswindow_rounded_transparent,
+    show_floating_overlay_window, snap_nswindow_directly,
 };
 use crate::menubar::{
     init_native_macos_menubar_item, setup_macos_application_menu, update_status_bar_title,
@@ -182,6 +182,7 @@ fn main() {
         .with_decorations(false)
         .with_transparent(true)
         .with_always_on_top(true)
+        .with_resizable(false)
         .with_inner_size(LogicalSize::new(450.0, drawer_h))
         .with_position(LogicalPosition::new(
             cur_disp.x as f64 + 12.0,
@@ -214,6 +215,7 @@ fn main() {
         .with_decorations(false)
         .with_transparent(true)
         .with_always_on_top(true)
+        .with_resizable(false)
         .with_inner_size(LogicalSize::new(alttab_w, alttab_h))
         .with_position(LogicalPosition::new(
             cur_disp.x as f64 + ((cur_disp.width as f64 - alttab_w) / 2.0).max(20.0),
@@ -239,27 +241,37 @@ fn main() {
     }
 
     // Window Pool 4: Multi-Monitor Screenshot Overlay Windows
+    let startup_displays = core_display::list_displays();
     let mut screenshot_windows = Vec::with_capacity(MAX_SCREENSHOT_SLOTS);
     let mut screenshot_webviews = Vec::with_capacity(MAX_SCREENSHOT_SLOTS);
     let mut screenshot_ids = Vec::with_capacity(MAX_SCREENSHOT_SLOTS);
 
     for slot in 0..MAX_SCREENSHOT_SLOTS {
+        let slot_disp = startup_displays.get(slot).unwrap_or(&cur_disp);
         let win = WindowBuilder::new()
             .with_title(&format!("Mac Omni Screenshot #{}", slot + 1))
             .with_decorations(false)
             .with_transparent(true)
             .with_always_on_top(false)
+            .with_resizable(false)
             .with_inner_size(LogicalSize::new(
-                cur_disp.width as f64,
-                cur_disp.height as f64,
+                slot_disp.width as f64,
+                slot_disp.height as f64,
             ))
-            .with_position(LogicalPosition::new(cur_disp.x as f64, cur_disp.y as f64))
+            .with_position(LogicalPosition::new(slot_disp.x as f64, slot_disp.y as f64))
             .with_visible(false)
             .build(&event_loop)
             .expect("Failed to create screenshot overlay window");
 
         unsafe {
             set_nswindow_rounded_transparent(&win, 0.0);
+            place_overlay_on_display(
+                &win,
+                slot_disp.x,
+                slot_disp.y,
+                slot_disp.width,
+                slot_disp.height,
+            );
             park_overlay_window_offscreen(&win);
         }
 
@@ -272,6 +284,13 @@ fn main() {
 
         unsafe {
             set_nswindow_rounded_transparent(&win, 0.0);
+            place_overlay_on_display(
+                &win,
+                slot_disp.x,
+                slot_disp.y,
+                slot_disp.width,
+                slot_disp.height,
+            );
             park_overlay_window_offscreen(&win);
         }
 
@@ -571,12 +590,9 @@ fn main() {
                         let _ = proxy.send_event(AppUserEvent::ScreenshotCaptureFailed);
                         return;
                     }
-                    if screenshot_windows.iter().any(|w| w.is_visible()) {
-                        return;
-                    }
                     {
                         let mut sess = screenshot_session().lock().unwrap();
-                        if sess.capturing {
+                        if sess.capturing || sess.revealed {
                             return;
                         }
                         sess.capturing = true;
@@ -698,12 +714,9 @@ fn main() {
                         let _ = proxy.send_event(AppUserEvent::ScreenshotCaptureFailed);
                         return;
                     }
-                    if screenshot_windows.iter().any(|w| w.is_visible()) {
-                        return;
-                    }
                     {
                         let mut sess = screenshot_session().lock().unwrap();
-                        if sess.capturing {
+                        if sess.capturing || sess.revealed {
                             return;
                         }
                         sess.capturing = true;
@@ -851,10 +864,17 @@ fn main() {
                     });
                 }
                 AppUserEvent::RevealScreenshotSlot { slot, seq } => {
-                    let reveal_params = {
+                    let (reveal_params, late_slot) = {
                         let mut sess = screenshot_session().lock().unwrap();
-                        if sess.capture_seq != seq || sess.revealed || sess.slots.is_empty() {
-                            None
+                        if sess.capture_seq != seq || sess.slots.is_empty() {
+                            (None, None)
+                        } else if sess.revealed {
+                            let count = sess.expected_slots.min(MAX_SCREENSHOT_SLOTS);
+                            if slot < count {
+                                (None, Some(slot))
+                            } else {
+                                (None, None)
+                            }
                         } else {
                             if slot < sess.ready_slots.len() {
                                 sess.ready_slots[slot] = true;
@@ -868,17 +888,17 @@ fn main() {
                                 || (slot == usize::MAX && target_is_ready);
                             if all_ready {
                                 sess.revealed = true;
-                                Some((sess.expected_slots, sess.target_slot, sess.ready_slots.clone()))
+                                (Some((sess.expected_slots, sess.target_slot)), None)
                             } else {
-                                None
+                                (None, None)
                             }
                         }
                     };
 
-                    if let Some((num_slots, target_slot, ready_slots)) = reveal_params {
+                    if let Some((num_slots, target_slot)) = reveal_params {
                         let count = num_slots.min(MAX_SCREENSHOT_SLOTS);
                         for idx in 0..count {
-                            if idx != target_slot && ready_slots.get(idx).copied().unwrap_or(false) {
+                            if idx != target_slot {
                                 unsafe {
                                     reveal_screenshot_window(&screenshot_windows[idx], false);
                                 }
@@ -888,6 +908,10 @@ fn main() {
                             unsafe {
                                 reveal_screenshot_window(&screenshot_windows[target_slot], true);
                             }
+                        }
+                    } else if let Some(idx) = late_slot {
+                        unsafe {
+                            reveal_screenshot_window(&screenshot_windows[idx], false);
                         }
                     }
                 }
@@ -952,22 +976,20 @@ fn main() {
                     ));
                 }
                 AppUserEvent::SetActiveScreenshotSlot(active_slot) => {
-                    let changed = {
+                    let (changed, active_count) = {
                         let mut sess = screenshot_session().lock().unwrap();
-                        if sess.active_slot == Some(active_slot) {
-                            false
+                        let count = sess.expected_slots.min(MAX_SCREENSHOT_SLOTS);
+                        if !sess.revealed || sess.active_slot == Some(active_slot) {
+                            (false, count)
                         } else {
                             sess.active_slot = Some(active_slot);
-                            true
+                            (true, count)
                         }
                     };
                     if !changed {
                         return;
                     }
-                    for (idx, win) in screenshot_windows.iter().enumerate() {
-                        if !win.is_visible() {
-                            continue;
-                        }
+                    for (idx, win) in screenshot_windows.iter().enumerate().take(active_count) {
                         if idx == active_slot {
                             unsafe {
                                 focus_and_elevate_macos_window(win, true, true);
@@ -1167,23 +1189,6 @@ fn main() {
                         && !screenshot_windows.iter().any(|w| w.is_visible())
                     {
                         core_input::set_overlay_escape_hotkey_active(false);
-                    }
-                } else if screenshot_ids.contains(&window_id) {
-                    let active_seq = {
-                        let sess = screenshot_session().lock().unwrap();
-                        if sess.revealed {
-                            Some(sess.capture_seq)
-                        } else {
-                            None
-                        }
-                    };
-                    if let Some(seq) = active_seq {
-                        let focus_proxy = proxy.clone();
-                        std::thread::spawn(move || {
-                            std::thread::sleep(std::time::Duration::from_millis(150));
-                            let _ = focus_proxy
-                                .send_event(AppUserEvent::CheckScreenshotFocusLost(seq));
-                        });
                     }
                 }
             }

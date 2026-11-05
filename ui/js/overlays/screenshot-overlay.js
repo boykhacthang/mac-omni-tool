@@ -761,7 +761,7 @@ function initScreenshotOverlay() {
     if (interactionMode === "selecting") {
       if (!sel || sel.w < 6 || sel.h < 6) {
         sel = null;
-        hintEl.style.display = "inline-flex";
+        hintEl.style.display = "none";
       }
     } else if (interactionMode === "drawing" && draftAnnotation) {
       if (draftAnnotation.type === "pen") {
@@ -864,11 +864,22 @@ function initScreenshotOverlay() {
     annotations = [];
     draftAnnotation = null;
     interactionMode = null;
-    hintEl.style.display = "inline-flex";
+    hintEl.style.display = "none";
     vertBar.style.display = "none";
     horizBar.style.display = "none";
     sizePill.style.display = "none";
     drawScene();
+  };
+
+  window.__selectFullscreenIfPickerMode = () => {
+    if (isFullscreenPickerMode && (!sel || sel.w < 6 || sel.h < 6)) {
+      sel = { x: 0, y: 0, w: screenW, h: screenH };
+      annotations = [];
+      draftAnnotation = null;
+      interactionMode = null;
+      hintEl.style.display = "none";
+      drawScene();
+    }
   };
 
   window.__prepareScreenshotHide = () => {
@@ -991,9 +1002,9 @@ function initScreenshotOverlay() {
 
     if (isFull) {
       sel = { x: 0, y: 0, w: targetW, h: targetH };
-      hintEl.style.display = "inline-flex";
+      hintEl.style.display = "none";
     } else {
-      hintEl.style.display = "inline-flex";
+      hintEl.style.display = "none";
       vertBar.style.display = "none";
       horizBar.style.display = "none";
       sizePill.style.display = "none";
@@ -1016,9 +1027,11 @@ function initScreenshotOverlay() {
         api("reveal_screenshot_slot", { slot: targetSlot, seq: targetSeq });
       };
       requestAnimationFrame(() => {
-        notifyReady();
+        requestAnimationFrame(() => {
+          notifyReady();
+        });
       });
-      setTimeout(notifyReady, 18);
+      setTimeout(notifyReady, 64);
     };
 
     nextImg.onload = () => {
@@ -1035,5 +1048,8 @@ function initScreenshotOverlay() {
   };
 
   setupCanvasDimensions(window.innerWidth, window.innerHeight);
+  // Pre-warm GPU CAMetalLayer backing store at startup so the first screenshot never flashes
+  ctx.fillStyle = "rgba(0,0,0,0)";
+  ctx.fillRect(0, 0, 1, 1);
 }
 

@@ -268,25 +268,8 @@
 }
 
 .ls-top-hint {
-  position: fixed;
-  top: 18px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(15, 23, 42, 0.90);
-  border: 1px solid rgba(255, 255, 255, 0.20);
-  color: #f8fafc;
-  padding: 6px 14px;
-  border-radius: 99px;
-  font-size: 12.2px;
-  font-weight: 500;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  pointer-events: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  z-index: 25;
-  backdrop-filter: blur(8px);
-  white-space: nowrap;
+  display: none !important;
+  pointer-events: none !important;
 }
 
 .ls-size-pill {

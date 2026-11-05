@@ -117,7 +117,7 @@ async function runUpdateCheckInModal(forceManual = false) {
   if (!box) return;
 
   const cfg = await api("get_input_config");
-  const curVerFallback = (cachedUpdateState && cachedUpdateState.current_version) || "2.1.2";
+  const curVerFallback = (cachedUpdateState && cachedUpdateState.current_version) || "2.2.0";
   const chk = document.getElementById("chk-modal-auto-update");
   if (chk && cfg) {
     chk.checked = cfg.auto_check_updates !== false;
@@ -317,7 +317,7 @@ function showAboutModalDialog(forceManualCheck = false) {
     existing.remove();
   }
 
-  const curVer = (cachedUpdateState && cachedUpdateState.current_version) || "2.1.2";
+  const curVer = (cachedUpdateState && cachedUpdateState.current_version) || "2.2.0";
   const backdrop = document.createElement("div");
   backdrop.id = "about-modal-backdrop";
   backdrop.className = "about-modal-backdrop";

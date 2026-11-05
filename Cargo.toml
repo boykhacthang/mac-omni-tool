@@ -19,7 +19,7 @@ rayon = "1.10"
 
 [package]
 name = "mac-omni-tool"
-version = "2.1.2"
+version = "2.2.0"
 edition = "2021"
 authors = ["boykhacthang"]
 license = "MIT"
