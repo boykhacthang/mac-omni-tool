@@ -16,9 +16,23 @@ use std::time::Duration;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
+struct NSPoint {
+    x: f64,
+    y: f64,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
 struct NSSize {
     width: f64,
     height: f64,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct NSRect {
+    origin: NSPoint,
+    size: NSSize,
 }
 
 #[link(name = "objc")]
@@ -34,6 +48,15 @@ extern "C" {
 extern "C" {}
 
 static APP_ICON_CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+pub fn clear_app_icon_cache() {
+    if let Some(lock) = APP_ICON_CACHE.get() {
+        if let Ok(mut guard) = lock.lock() {
+            guard.clear();
+            guard.shrink_to_fit();
+        }
+    }
+}
 
 fn base64_encode(input: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -76,7 +99,13 @@ fn get_app_icon_data_url(app_path: &str) -> String {
         type Msg0Ptr = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *const u8;
         type Msg1 = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> *mut c_void;
         type Msg1Str = unsafe extern "C" fn(*mut c_void, *mut c_void, *const c_char) -> *mut c_void;
-        type MsgSetSize = unsafe extern "C" fn(*mut c_void, *mut c_void, NSSize);
+        type MsgCGForRect = unsafe extern "C" fn(
+            *mut c_void,
+            *mut c_void,
+            *mut NSRect,
+            *mut c_void,
+            *mut c_void,
+        ) -> *mut c_void;
         type Msg2Repr =
             unsafe extern "C" fn(*mut c_void, *mut c_void, usize, *mut c_void) -> *mut c_void;
 
@@ -85,7 +114,7 @@ fn get_app_icon_data_url(app_path: &str) -> String {
         let msg0_ptr: Msg0Ptr = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1: Msg1 = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_str: Msg1Str = std::mem::transmute(objc_msgSend as *const c_void);
-        let msg_set_size: MsgSetSize = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg_cg_rect: MsgCGForRect = std::mem::transmute(objc_msgSend as *const c_void);
         let msg2_repr: Msg2Repr = std::mem::transmute(objc_msgSend as *const c_void);
 
         let ws_cls = objc_getClass(c"NSWorkspace".as_ptr());
@@ -103,20 +132,28 @@ fn get_app_icon_data_url(app_path: &str) -> String {
                 if !ws.is_null() && !ns_path.is_null() {
                     let img = msg1(ws, sel_registerName(c"iconForFile:".as_ptr()), ns_path);
                     if !img.is_null() {
-                        msg_set_size(
-                            img,
-                            sel_registerName(c"setSize:".as_ptr()),
-                            NSSize {
-                                width: 40.0,
-                                height: 40.0,
+                        // Request only the 64x64 (32pt @2x) icon representation via CGImageForProposedRect
+                        // so AppKit never decodes or caches the 1024x1024 full-res ICNS layer in CG Image memory!
+                        let mut proposed = NSRect {
+                            origin: NSPoint { x: 0.0, y: 0.0 },
+                            size: NSSize {
+                                width: 64.0,
+                                height: 64.0,
                             },
+                        };
+                        let cg_img = msg_cg_rect(
+                            img,
+                            sel_registerName(c"CGImageForProposedRect:context:hints:".as_ptr()),
+                            &mut proposed,
+                            std::ptr::null_mut(),
+                            std::ptr::null_mut(),
                         );
-                        let tiff = msg0(img, sel_registerName(c"TIFFRepresentation".as_ptr()));
-                        if !tiff.is_null() {
+                        if !cg_img.is_null() {
+                            let rep_alloc = msg0(rep_cls, sel_registerName(c"alloc".as_ptr()));
                             let rep = msg1(
-                                rep_cls,
-                                sel_registerName(c"imageRepWithData:".as_ptr()),
-                                tiff,
+                                rep_alloc,
+                                sel_registerName(c"initWithCGImage:".as_ptr()),
+                                cg_img,
                             );
                             if !rep.is_null() {
                                 let png = msg2_repr(
@@ -138,6 +175,7 @@ fn get_app_icon_data_url(app_path: &str) -> String {
                                         );
                                     }
                                 }
+                                let _ = msg0(rep, sel_registerName(c"release".as_ptr()));
                             }
                         }
                     }

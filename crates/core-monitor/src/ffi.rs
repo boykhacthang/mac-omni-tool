@@ -5,12 +5,14 @@ use std::ffi::{c_void, CStr};
 
 pub type CFAllocatorRef = *const c_void;
 pub type CFArrayRef = *const c_void;
+pub type CFDictionaryRef = *const c_void;
 pub type CFStringRef = *const c_void;
 pub type CFTypeRef = *const c_void;
 pub type CFIndex = isize;
 pub type CFStringEncoding = u32;
 
 pub const K_CF_STRING_ENCODING_UTF8: CFStringEncoding = 0x08000100;
+pub const K_CF_NUMBER_SINT64_TYPE: CFIndex = 4;
 pub const K_IOHID_EVENT_TYPE_TEMPERATURE: i64 = 15;
 pub const K_IOHID_EVENT_FIELD_TEMPERATURE_LEVEL: i32 = 15 << 16;
 
@@ -35,6 +37,12 @@ extern "C" {
         buffer_size: CFIndex,
         encoding: CFStringEncoding,
     ) -> bool;
+    pub fn CFDictionaryGetValue(the_dict: CFDictionaryRef, key: *const c_void) -> *const c_void;
+    pub fn CFNumberGetValue(
+        number: CFTypeRef,
+        the_type: CFIndex,
+        value_ptr: *mut c_void,
+    ) -> bool;
     pub fn CFRelease(cf: CFTypeRef);
 }
 
@@ -50,6 +58,20 @@ extern "C" {
         timeout: i64,
     ) -> CFTypeRef;
     pub fn IOHIDEventGetFloatValue(event: CFTypeRef, field: i32) -> f64;
+    pub fn IOServiceMatching(name: *const i8) -> CFDictionaryRef;
+    pub fn IOServiceGetMatchingServices(
+        main_port: u32,
+        matching: CFDictionaryRef,
+        existing: *mut u32,
+    ) -> i32;
+    pub fn IOIteratorNext(iterator: u32) -> u32;
+    pub fn IOObjectRelease(object: u32) -> i32;
+    pub fn IORegistryEntryCreateCFProperties(
+        entry: u32,
+        properties: *mut CFDictionaryRef,
+        allocator: CFAllocatorRef,
+        options: u32,
+    ) -> i32;
 }
 
 /// Convert a `CFStringRef` into a Rust `String`.

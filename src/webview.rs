@@ -22,6 +22,22 @@ pub fn build_webview_with_api(
                     .header("Access-Control-Allow-Origin", "omni://localhost")
                     .body(Cow::Owned(bytes))
                     .unwrap()
+            } else if let Some(fname) = path.strip_prefix("/clipboard_img/") {
+                let safe_name = std::path::Path::new(fname)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("");
+                let bytes = if !safe_name.is_empty() && safe_name.ends_with(".png") {
+                    std::fs::read(core_clipboard::images_dir().join(safe_name)).unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                Response::builder()
+                    .header("Content-Type", "image/png")
+                    .header("Cache-Control", "max-age=3600")
+                    .header("Access-Control-Allow-Origin", "omni://localhost")
+                    .body(Cow::Owned(bytes))
+                    .unwrap()
             } else if path == "/screenshot.png"
                 || (path.starts_with("/screenshot_") && path.ends_with(".png"))
             {

@@ -14,31 +14,62 @@
   <div id="root"></div>
   <div id="toast" class="toast-banner"></div>
 
-  <!-- Core RPC, Locale Dictionaries, Multi-Language (i18n) & Shared UI Components -->
+  <!-- Core RPC, Locale Dictionaries & Multi-Language (i18n) -->
   <script src="/js/core/api.js"></script>
   <script src="/js/locales/en.js"></script>
   <script src="/js/locales/vi.js"></script>
   <script src="/js/core/i18n.js"></script>
-  <script src="/js/components/clipboard-card.js"></script>
-  <script src="/js/components/path-cell.js"></script>
 
-  <!-- Standalone Dashboard Screen Modules -->
-  <script src="/js/screens/display-audio.js"></script>
-  <script src="/js/screens/hardware-monitor.js"></script>
-  <script src="/js/screens/clipboard-tab.js"></script>
-  <script src="/js/screens/window-tiling.js"></script>
-  <script src="/js/screens/mouse.js"></script>
-  <script src="/js/screens/system-cleaner.js"></script>
-  <script src="/js/screens/settings.js"></script>
-
-  <!-- Standalone Overlay Window Modules -->
-  <script src="/js/overlays/menubar-popover.js"></script>
-  <script src="/js/overlays/clipboard-drawer.js"></script>
-  <script src="/js/overlays/alttab-overlay.js"></script>
-  <script src="/js/overlays/screenshot-overlay.js"></script>
-
-  <!-- Main Dashboard Shell & Mode Router -->
-  <script src="/js/app.js"></script>
+  <!-- Mode-Aware Lazy Script Loader: Each WebView only parses and executes the modules required for its ?mode= -->
+  <script>
+    (function () {
+      const modeBundles = {
+        mini_widget: [
+          "/js/overlays/menubar-popover.js"
+        ],
+        clipboard_drawer: [
+          "/js/components/clipboard-card.js",
+          "/js/overlays/clipboard-drawer.js"
+        ],
+        alttab: [
+          "/js/overlays/alttab-overlay.js"
+        ],
+        screenshot_overlay: [
+          "/js/overlays/screenshot-overlay.js"
+        ],
+        main: [
+          "/js/components/clipboard-card.js",
+          "/js/components/path-cell.js",
+          "/js/screens/display-audio.js",
+          "/js/screens/hardware-monitor.js",
+          "/js/screens/clipboard-tab.js",
+          "/js/screens/window-tiling.js",
+          "/js/screens/mouse.js",
+          "/js/screens/system-cleaner.js",
+          "/js/screens/settings.js",
+          "/js/app.js"
+        ]
+      };
+      const scripts = modeBundles[APP_MODE] || modeBundles.main;
+      for (let i = 0; i < scripts.length; i++) {
+        document.write('<script src="' + scripts[i] + '"><\/script>');
+      }
+    })();
+  </script>
+  <script>
+    if (typeof window.__omniBootstrapped === "undefined") {
+      window.__omniBootstrapped = true;
+      if (APP_MODE === "mini_widget" && typeof initMiniLeftWidget === "function") {
+        initMiniLeftWidget();
+      } else if (APP_MODE === "clipboard_drawer" && typeof initClipboardDrawer === "function") {
+        initClipboardDrawer();
+      } else if (APP_MODE === "alttab" && typeof initAltTabOverlay === "function") {
+        initAltTabOverlay();
+      } else if (APP_MODE === "screenshot_overlay" && typeof initScreenshotOverlay === "function") {
+        initScreenshotOverlay();
+      }
+    }
+  </script>
 </body>
 
 </html>

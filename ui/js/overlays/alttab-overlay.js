@@ -128,6 +128,11 @@ async function initAltTabOverlay() {
   window.__commitAltTabSelection = () => {
     commitSelection(selectedIdx);
   };
+  window.__onAltTabHidden = () => {
+    windows = [];
+    const grid = document.getElementById("alttab-grid");
+    if (grid) grid.innerHTML = "";
+  };
 
   renderAltTabShell();
 }

@@ -24,7 +24,8 @@ pub use models::{
 };
 pub use scan_manager::{
     get_cleaner_scan_status, invalidate_cleaner_cache, prewarm_cleaner_cache,
-    scan_installed_applications_cached, scan_system_junk_cached, start_cleaner_scan_async,
+    release_cleaner_memory, scan_installed_applications_cached, scan_system_junk_cached,
+    start_cleaner_scan_async,
 };
 pub use trash_and_junk::{
     clean_selected_paths, clean_selected_paths_ext, compute_dir_size, compute_dir_size_fast,

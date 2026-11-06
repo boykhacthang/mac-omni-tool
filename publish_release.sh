@@ -17,21 +17,19 @@ PUB_DATE="$(date '+%Y-%m-%d')"
 
 echo "🚀 Bắt đầu đóng gói và phát hành Mac Omni Tool v${VERSION}..."
 
-# 1. Cập nhật version trong Cargo.toml, bundle_app.sh, UI và README
+# 1. Cập nhật version trong Cargo.toml, bundle_app.sh và UI
 sed -i '' -E "s/^version = \"[0-9]+\.[0-9]+\.[0-9]+\"/version = \"${VERSION}\"/" Cargo.toml
 sed -i '' -E "s/<string>[0-9]+\.[0-9]+\.[0-9]+<\/string>/<string>${VERSION}<\/string>/g" bundle_app.sh
 sed -i '' -E "s/\|\| \"[0-9]+\.[0-9]+\.[0-9]+\"/|| \"${VERSION}\"/g" ui/js/app.js
 sed -i '' -E "s/v[0-9]+\.[0-9]+\.[0-9]+ • MIT License/v${VERSION} • MIT License/g" ui/js/screens/settings.js
 sed -i '' -E "s/version: \"[0-9]+\.[0-9]+\.[0-9]+\"/version: \"${VERSION}\"/g" ui/js/screens/settings.js
 sed -i '' -E "s/Version-[0-9]+\.[0-9]+\.[0-9]+-3b82f6/Version-${VERSION}-3b82f6/g" README.md README.vi.md
-sed -i '' -E "s/v[0-9]+\.[0-9]+\.[0-9]+/v${VERSION}/g" README.md README.vi.md
 
 # 2. Chạy bộ kiểm thử và đóng gói MacOmniTool.app + .dmg + .zip
 cargo test --workspace
 ./build_installer_dmg.sh
 
-# 3. Dọn dẹp bản cũ và lưu bộ cài mới vào thư mục releases/v<VERSION>/
-rm -rf releases/v*
+# 3. Lưu bộ cài mới vào thư mục releases/v<VERSION>/ (giữ nguyên các bản phát hành cũ)
 REL_DIR="releases/v${VERSION}"
 mkdir -p "$REL_DIR"
 DMG_FILE="${REL_DIR}/MacOmniTool-v${VERSION}-Installer.dmg"
@@ -58,13 +56,7 @@ EOF
 
 echo "✅ Đã tạo xong releases/latest.json (SHA256: ${SHA256_ZIP})"
 
-# 5. Xóa các Git Tag cũ (Local & Remote), Commit, tạo Git Tag mới và đẩy lên GitHub
-OLD_TAGS=($(git tag -l "v*" | grep -v "^v${VERSION}$" || true))
-for t in "${OLD_TAGS[@]}"; do
-  git tag -d "$t" 2>/dev/null || true
-  git push origin ":refs/tags/${t}" 2>/dev/null || true
-done
-
+# 5. Commit, tạo Git Tag mới và đẩy lên GitHub (giữ nguyên các Git Tag cũ)
 git add -A
 git commit -m "release(v${VERSION}): ${NOTES_VI}" || true
 git tag -f -a "v${VERSION}" -m "Mac Omni Tool v${VERSION} — ${NOTES_VI}"

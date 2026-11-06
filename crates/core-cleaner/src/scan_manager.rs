@@ -33,6 +33,21 @@ pub fn invalidate_cleaner_cache() {
         guard.large_result = None;
         guard.duplicates_result = None;
     }
+    crate::uninstaller::clear_app_icon_cache();
+}
+
+/// Free cached scan results and Base64 app icons when the main window is hidden to background
+/// (unless a background scan is actively in progress).
+pub fn release_cleaner_memory() {
+    if let Ok(mut guard) = status_mutex().lock() {
+        if !guard.running {
+            guard.junk_result = None;
+            guard.apps_result = None;
+            guard.large_result = None;
+            guard.duplicates_result = None;
+            crate::uninstaller::clear_app_icon_cache();
+        }
+    }
 }
 
 pub fn scan_system_junk_cached(force: bool) -> JunkScanSummary {

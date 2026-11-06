@@ -35,7 +35,7 @@ function renderFullClipboardCardsHtml(items, selectedIdx = -1, actionLabel = "",
         </div>
       </div>
       ${item.kind === "image" && item.image_data_url
-      ? `<img class="clip-full-img" src="${item.image_data_url}" />`
+      ? `<img class="clip-full-img" loading="lazy" decoding="async" src="${item.image_data_url}" />`
       : `<div class="clip-full-text">${escapeHtml(item.full_text || item.preview_text)}</div>`
     }
     </div>

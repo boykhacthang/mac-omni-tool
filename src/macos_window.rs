@@ -407,8 +407,8 @@ pub unsafe fn set_nswindow_rounded_transparent(window: &tao::window::Window, cor
 
 /// Safely hide an overlay window, zero its opacity, lower its level,
 /// and make it ignore all mouse events so a hidden overlay window can NEVER intercept clicks, flash stale frames,
-/// or freeze the screen on any Space, while preserving its full display size so WKWebView never has to reallocate
-/// its GPU CAMetalLayer backing store from 1x1 on the next screenshot.
+/// or freeze the screen on any Space, while preserving its display frame so `WKWebView` never has to asynchronously
+/// resize its viewport when revealing the next screenshot.
 pub unsafe fn park_overlay_window_offscreen(window: &tao::window::Window) {
     let pool = objc_autoreleasePoolPush();
     let ns_win = window.ns_window();
@@ -1189,4 +1189,19 @@ pub unsafe fn place_main_window_center_75_full_height(window: &tao::window::Wind
     }
     objc_autoreleasePoolPop(pool);
 }
+
+extern "C" {
+    fn malloc_zone_pressure_relief(zone: *mut c_void, goal: usize) -> usize;
+}
+
+/// Release cached dashboard/cleaner heap allocations and advise macOS `libmalloc`
+/// to return free magazine pages to the kernel when windows are hidden to the background.
+pub fn release_process_heap_memory() {
+    core_monitor::release_dashboard_memory();
+    core_cleaner::release_cleaner_memory();
+    unsafe {
+        let _ = malloc_zone_pressure_relief(std::ptr::null_mut(), 0);
+    }
+}
+
 

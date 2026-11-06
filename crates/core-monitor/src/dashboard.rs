@@ -26,11 +26,12 @@ static MONITOR: OnceLock<Mutex<MonitorState>> = OnceLock::new();
 
 fn get_monitor() -> &'static Mutex<MonitorState> {
     MONITOR.get_or_init(|| {
+        // Initialize only CPU, RAM, and Networks on startup.
+        // Do NOT populate the ~1,000-process table or disk list until the Hardware Monitor dashboard is actually opened!
         let mut sys = System::new();
         sys.refresh_cpu_all();
         sys.refresh_memory();
-        sys.refresh_processes_specifics(ProcessesToUpdate::All, light_process_refresh_kind());
-        let disks = Disks::new_with_refreshed_list();
+        let disks = Disks::new();
         let networks = Networks::new_with_refreshed_list();
         Mutex::new(MonitorState {
             sys,
@@ -45,6 +46,23 @@ fn get_monitor() -> &'static Mutex<MonitorState> {
             cached_battery: None,
         })
     })
+}
+
+/// Drop the cached ~1,000-process table and disk list when the main dashboard window is hidden to background,
+/// keeping background Menu Bar telemetry (`get_menubar_stats`) ultra-lightweight.
+pub fn release_dashboard_memory() {
+    if let Some(lock) = MONITOR.get() {
+        if let Ok(mut guard) = lock.lock() {
+            if !guard.sys.processes().is_empty() {
+                let mut light_sys = System::new();
+                light_sys.refresh_cpu_usage();
+                light_sys.refresh_memory();
+                guard.sys = light_sys;
+            }
+            guard.disks = Disks::new();
+            guard.cached_battery = None;
+        }
+    }
 }
 
 fn refresh_network_rates(guard: &mut MonitorState) -> (u64, u64, u64, u64) {
@@ -123,6 +141,7 @@ pub fn get_hardware_dashboard(sort_by: &str, limit: usize) -> HardwareDashboardD
     guard
         .sys
         .refresh_processes_specifics(ProcessesToUpdate::All, light_process_refresh_kind());
+    guard.disks.refresh_list();
     guard.disks.refresh();
 
     let total_mem = guard.sys.total_memory().max(1);

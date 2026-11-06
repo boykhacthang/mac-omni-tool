@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 static CLIPBOARD_ENABLED: AtomicBool = AtomicBool::new(true);
-static DB_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static DB_CONN: OnceLock<Mutex<usize>> = OnceLock::new();
 
 pub fn is_clipboard_enabled() -> bool {
     CLIPBOARD_ENABLED.load(Ordering::Relaxed)
@@ -23,8 +23,8 @@ pub fn set_clipboard_enabled(enabled: bool) {
     }
 }
 
-fn db_mutex() -> &'static Mutex<()> {
-    DB_LOCK.get_or_init(|| Mutex::new(()))
+fn db_conn_mutex() -> &'static Mutex<usize> {
+    DB_CONN.get_or_init(|| Mutex::new(0))
 }
 
 pub fn app_data_dir() -> PathBuf {
@@ -45,7 +45,10 @@ pub fn images_dir() -> PathBuf {
     app_data_dir().join("clipboard_images")
 }
 
-unsafe fn open_db() -> Option<*mut Sqlite3> {
+unsafe fn get_or_open_db(conn_slot: &mut usize) -> Option<*mut Sqlite3> {
+    if *conn_slot != 0 {
+        return Some(*conn_slot as *mut Sqlite3);
+    }
     let c_path = CString::new(db_path().to_string_lossy().as_bytes()).ok()?;
     let mut db: *mut Sqlite3 = std::ptr::null_mut();
     if sqlite3_open(c_path.as_ptr(), &mut db) != SQLITE_OK {
@@ -58,6 +61,7 @@ unsafe fn open_db() -> Option<*mut Sqlite3> {
     let init_sql = CString::new(
         "PRAGMA journal_mode=WAL;
          PRAGMA synchronous=NORMAL;
+         PRAGMA cache_size=-2000;
          CREATE TABLE IF NOT EXISTS clipboard_items (
              id INTEGER PRIMARY KEY AUTOINCREMENT,
              kind TEXT NOT NULL,
@@ -80,6 +84,7 @@ unsafe fn open_db() -> Option<*mut Sqlite3> {
         std::ptr::null_mut(),
         std::ptr::null_mut(),
     );
+    *conn_slot = db as usize;
     Some(db)
 }
 
@@ -103,12 +108,14 @@ pub fn record_clipboard_entry(
     content_hash: &str,
     source_app: &str,
 ) {
-    let _guard = db_mutex().lock().unwrap();
+    let mut conn_guard = db_conn_mutex().lock().unwrap();
     let preview: String = full_text.chars().take(280).collect();
     let now = now_unix_ms();
 
     unsafe {
-        let Some(db) = open_db() else { return };
+        let Some(db) = get_or_open_db(&mut conn_guard) else {
+            return;
+        };
 
         let upsert_sql = CString::new(
             "INSERT INTO clipboard_items (kind, preview_text, full_text, image_path, byte_size, content_hash, source_app, is_pinned, created_at)
@@ -192,8 +199,6 @@ pub fn record_clipboard_entry(
                 );
             }
         }
-
-        sqlite3_close(db);
     }
 }
 
@@ -204,7 +209,7 @@ pub fn query_clipboard_page(
     page: usize,
     page_size: usize,
 ) -> ClipboardPageResult {
-    let _guard = db_mutex().lock().unwrap();
+    let mut conn_guard = db_conn_mutex().lock().unwrap();
     let per_page = if page_size == 0 {
         50
     } else {
@@ -218,7 +223,7 @@ pub fn query_clipboard_page(
     let mut total_matching = 0usize;
 
     unsafe {
-        let Some(db) = open_db() else {
+        let Some(db) = get_or_open_db(&mut conn_guard) else {
             return ClipboardPageResult {
                 items: page_items,
                 page: current_page,
@@ -268,8 +273,17 @@ pub fn query_clipboard_page(
                 total_matching += 1;
 
                 if idx >= offset && page_items.len() < per_page {
+                    // Serve clipboard images via zero-copy `omni://localhost/clipboard_img/<file>` URL
+                    // instead of reading and Base64-encoding megabytes of PNG data into JSON!
                     let image_data_url = if kind == "image" && !image_path.is_empty() {
-                        if let Ok(bytes) = fs::read(&image_path) {
+                        let p = std::path::Path::new(&image_path);
+                        if let Some(fname) = p.file_name().and_then(|n| n.to_str()) {
+                            if p.exists() {
+                                format!("omni://localhost/clipboard_img/{}", fname)
+                            } else {
+                                String::new()
+                            }
+                        } else if let Ok(bytes) = fs::read(&image_path) {
                             format!("data:image/png;base64,{}", base64_encode(&bytes))
                         } else {
                             String::new()
@@ -295,8 +309,6 @@ pub fn query_clipboard_page(
             }
             sqlite3_finalize(stmt);
         }
-
-        sqlite3_close(db);
     }
 
     let total_pages = ((total_matching + per_page - 1) / per_page).max(1);
@@ -316,9 +328,11 @@ pub fn query_clipboard_items(query: &str, filter_kind: &str, limit: usize) -> Ve
 }
 
 pub fn toggle_pin_clipboard_item(id: i64) -> bool {
-    let _guard = db_mutex().lock().unwrap();
+    let mut conn_guard = db_conn_mutex().lock().unwrap();
     unsafe {
-        let Some(db) = open_db() else { return false };
+        let Some(db) = get_or_open_db(&mut conn_guard) else {
+            return false;
+        };
         if let Ok(sql) = CString::new(format!(
             "UPDATE clipboard_items SET is_pinned = CASE WHEN is_pinned = 1 THEN 0 ELSE 1 END WHERE id = {};",
             id
@@ -331,15 +345,16 @@ pub fn toggle_pin_clipboard_item(id: i64) -> bool {
                 std::ptr::null_mut(),
             );
         }
-        sqlite3_close(db);
     }
     true
 }
 
 pub fn delete_clipboard_item(id: i64) -> bool {
-    let _guard = db_mutex().lock().unwrap();
+    let mut conn_guard = db_conn_mutex().lock().unwrap();
     unsafe {
-        let Some(db) = open_db() else { return false };
+        let Some(db) = get_or_open_db(&mut conn_guard) else {
+            return false;
+        };
         if let Ok(sel_sql) = CString::new(format!(
             "SELECT image_path FROM clipboard_items WHERE id = {};",
             id
@@ -366,15 +381,16 @@ pub fn delete_clipboard_item(id: i64) -> bool {
                 std::ptr::null_mut(),
             );
         }
-        sqlite3_close(db);
     }
     true
 }
 
 pub fn clear_unpinned_clipboard_items() -> bool {
-    let _guard = db_mutex().lock().unwrap();
+    let mut conn_guard = db_conn_mutex().lock().unwrap();
     unsafe {
-        let Some(db) = open_db() else { return false };
+        let Some(db) = get_or_open_db(&mut conn_guard) else {
+            return false;
+        };
         if let Ok(sel_sql) = CString::new(
             "SELECT image_path FROM clipboard_items WHERE is_pinned = 0 AND image_path != '';",
         ) {
@@ -400,21 +416,25 @@ pub fn clear_unpinned_clipboard_items() -> bool {
                 std::ptr::null_mut(),
             );
         }
-        sqlite3_close(db);
     }
     true
 }
 
 pub fn get_clipboard_stats() -> ClipboardStats {
-    let _guard = db_mutex().lock().unwrap();
+    let mut conn_guard = db_conn_mutex().lock().unwrap();
     let mut total_items = 0usize;
     let mut pinned_items = 0usize;
     let mut image_items = 0usize;
+    let mut disk_usage_bytes = 0u64;
 
     unsafe {
-        if let Some(db) = open_db() {
+        if let Some(db) = get_or_open_db(&mut conn_guard) {
             if let Ok(sql) = CString::new(
-                "SELECT COUNT(*), SUM(CASE WHEN is_pinned = 1 THEN 1 ELSE 0 END), SUM(CASE WHEN kind = 'image' THEN 1 ELSE 0 END) FROM clipboard_items;",
+                "SELECT COUNT(*),
+                        SUM(CASE WHEN is_pinned = 1 THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN kind = 'image' THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN kind = 'image' THEN byte_size ELSE 0 END)
+                 FROM clipboard_items;",
             ) {
                 let mut stmt: *mut Sqlite3Stmt = std::ptr::null_mut();
                 if sqlite3_prepare_v2(db, sql.as_ptr(), -1, &mut stmt, std::ptr::null_mut())
@@ -424,19 +444,10 @@ pub fn get_clipboard_stats() -> ClipboardStats {
                         total_items = sqlite3_column_int64(stmt, 0) as usize;
                         pinned_items = sqlite3_column_int64(stmt, 1) as usize;
                         image_items = sqlite3_column_int64(stmt, 2) as usize;
+                        disk_usage_bytes = sqlite3_column_int64(stmt, 3).max(0) as u64;
                     }
                     sqlite3_finalize(stmt);
                 }
-            }
-            sqlite3_close(db);
-        }
-    }
-
-    let mut disk_usage_bytes = 0u64;
-    if let Ok(entries) = fs::read_dir(images_dir()) {
-        for entry in entries.flatten() {
-            if let Ok(meta) = entry.metadata() {
-                disk_usage_bytes += meta.len();
             }
         }
     }

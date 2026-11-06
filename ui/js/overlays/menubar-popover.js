@@ -10,6 +10,9 @@ async function initMiniLeftWidget() {
   let permsState = null;
   let lastAudioSig = "";
   let isDraggingSlider = false;
+  let isPopoverOpen = false;
+  let audioTimer = null;
+  let telemetryTimer = null;
 
   function computeAudioSignature(aud) {
     if (!aud) return "";
@@ -36,11 +39,6 @@ async function initMiniLeftWidget() {
     permsState = perms;
     lastAudioSig = computeAudioSignature(aud);
 
-    const cpuPct = hwData ? formatPct(hwData.cpu_usage_percent) : "0.0%";
-    const rawTemp = hwData
-      ? (hwData.cpu_temp_c ?? (hwData.temperatures && hwData.temperatures.cpu_temp_c) ?? 45)
-      : 45;
-    const cpuTemp = formatTemp(rawTemp);
     if (!inputCfg || (inputCfg.menubar_enabled !== false && inputCfg.menubar_display_mode !== "hidden")) {
       await api("update_menubar_title", { title: formatMenuBarTitlePreview(inputCfg, hwData) });
     }
@@ -49,38 +47,53 @@ async function initMiniLeftWidget() {
     }
   }
 
-  // Auto-detect headphones / AirPods / speakers plug/unplug every 1.2s
-  setInterval(async () => {
-    if (isDraggingSlider || document.hidden) return;
-    const aud = await api("get_audio_state");
-    const newSig = computeAudioSignature(aud);
-    if (newSig && newSig !== lastAudioSig) {
-      lastAudioSig = newSig;
-      audioState = aud;
-      renderMini();
+  function stopMiniPollingTimers() {
+    isPopoverOpen = false;
+    if (audioTimer) {
+      clearInterval(audioTimer);
+      audioTimer = null;
     }
-  }, 1200);
+    if (telemetryTimer) {
+      clearInterval(telemetryTimer);
+      telemetryTimer = null;
+    }
+  }
 
-  // Update Menu Bar telemetry when popover is active
-  setInterval(async () => {
-    if (isDraggingSlider) return;
-    const hw = await api("get_menubar_stats");
-    if (hw) {
-      hwData = hw;
-      const cpuPct = formatPct(hwData.cpu_usage_percent);
-      const rawTemp = hwData.cpu_temp_c ?? (hwData.temperatures && hwData.temperatures.cpu_temp_c) ?? 45;
-      const cpuTemp = formatTemp(rawTemp);
-      if (!inputCfg || (inputCfg.menubar_enabled !== false && inputCfg.menubar_display_mode !== "hidden")) {
-        await api("update_menubar_title", { title: formatMenuBarTitlePreview(inputCfg, hwData) });
+  function startMiniPollingTimers() {
+    stopMiniPollingTimers();
+    isPopoverOpen = true;
+
+    // Auto-detect headphones / AirPods / speakers plug/unplug ONLY while popover is open
+    audioTimer = setInterval(async () => {
+      if (!isPopoverOpen || isDraggingSlider || document.hidden) return;
+      const aud = await api("get_audio_state");
+      const newSig = computeAudioSignature(aud);
+      if (newSig && newSig !== lastAudioSig) {
+        lastAudioSig = newSig;
+        audioState = aud;
+        renderMini();
       }
-      const subEl = document.getElementById("mini-hw-sub");
-      if (subEl) {
-        subEl.textContent = `CPU ${cpuPct} • ${cpuTemp} • RAM ${formatPct(hwData.memory_usage_percent)}`;
+    }, 1500);
+
+    // Update Menu Bar header telemetry ONLY while popover is open
+    telemetryTimer = setInterval(async () => {
+      if (!isPopoverOpen || isDraggingSlider || document.hidden) return;
+      const hw = await api("get_menubar_stats");
+      if (hw) {
+        hwData = hw;
+        const cpuPct = formatPct(hwData.cpu_usage_percent);
+        const rawTemp = hwData.cpu_temp_c ?? (hwData.temperatures && hwData.temperatures.cpu_temp_c) ?? 45;
+        const cpuTemp = formatTemp(rawTemp);
+        const subEl = document.getElementById("mini-hw-sub");
+        if (subEl) {
+          subEl.textContent = `CPU ${cpuPct} • ${cpuTemp} • RAM ${formatPct(hwData.memory_usage_percent)}`;
+        }
       }
-    }
-  }, 4000);
+    }, 3000);
+  }
 
   async function closePopover() {
+    stopMiniPollingTimers();
     await api("set_mini_expanded", { expanded: false });
   }
 
@@ -362,6 +375,12 @@ async function initMiniLeftWidget() {
 
   window.__onThemeChanged = renderMini;
   window.__onLangChanged = renderMini;
-  window.__refreshMiniPopover = pollMiniStats;
-  pollMiniStats();
+  window.__refreshMiniPopover = () => {
+    startMiniPollingTimers();
+    pollMiniStats();
+  };
+  window.__onMiniPopoverHidden = () => {
+    stopMiniPollingTimers();
+  };
+  renderMini();
 }

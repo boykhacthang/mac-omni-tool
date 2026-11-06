@@ -199,6 +199,11 @@ async function initClipboardDrawer() {
     if (inp) inp.focus();
     refreshList();
   };
+  window.__onDrawerHidden = () => {
+    items = [];
+    const listEl = document.getElementById("drawer-list");
+    if (listEl) listEl.innerHTML = "";
+  };
 
   renderDrawerShell();
 }

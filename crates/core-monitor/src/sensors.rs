@@ -4,6 +4,36 @@ use crate::ffi::*;
 use crate::models::{BatteryInfo, TempSensorReading, TemperatureSummary};
 use std::ffi::CString;
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
+struct HidThermalClient {
+    client_ptr: usize,
+    product_key_ptr: usize,
+    last_read: Option<(Instant, TemperatureSummary)>,
+}
+
+static HID_CLIENT: OnceLock<Mutex<HidThermalClient>> = OnceLock::new();
+
+fn hid_client_mutex() -> &'static Mutex<HidThermalClient> {
+    HID_CLIENT.get_or_init(|| {
+        let (client_ptr, product_key_ptr) = unsafe {
+            let client = IOHIDEventSystemClientCreate(std::ptr::null());
+            let key_cstr = CString::new("Product").unwrap();
+            let key_cf = CFStringCreateWithCString(
+                std::ptr::null(),
+                key_cstr.as_ptr(),
+                K_CF_STRING_ENCODING_UTF8,
+            );
+            (client as usize, key_cf as usize)
+        };
+        Mutex::new(HidThermalClient {
+            client_ptr,
+            product_key_ptr,
+            last_read: None,
+        })
+    })
+}
 
 /// Categorize an Apple Silicon sensor name into `"GPU"`, `"CPU/SoC"`, `"Battery/PMU"`, or `"Storage/Other"`.
 pub fn classify_sensor_category(name: &str) -> &'static str {
@@ -31,24 +61,30 @@ pub fn classify_sensor_category(name: &str) -> &'static str {
 }
 
 /// Read real hardware temperatures from Apple Silicon `IOHIDEventSystemClient` sensors.
-/// Wrapped in an Objective-C autorelease pool so background threads never leak temporary CF/ObjC objects.
+/// Reuses a persistent `IOHIDEventSystemClient` instance and caches readings for 1.2s
+/// to avoid redundant Mach IPC & CF allocations when polled from multiple components.
 pub fn read_hardware_temperatures() -> TemperatureSummary {
+    let mut guard = hid_client_mutex().lock().unwrap();
+    if let Some((ts, ref cached)) = guard.last_read {
+        if ts.elapsed() < Duration::from_millis(1200) {
+            return cached.clone();
+        }
+    }
+
     let mut sensors = Vec::new();
 
     unsafe {
         let pool = objc_autoreleasePoolPush();
-        let client = IOHIDEventSystemClientCreate(std::ptr::null());
-        if !client.is_null() {
+        if guard.client_ptr == 0 {
+            guard.client_ptr = IOHIDEventSystemClientCreate(std::ptr::null()) as usize;
+        }
+        let client = guard.client_ptr as CFTypeRef;
+        let key_cf = guard.product_key_ptr as CFStringRef;
+
+        if !client.is_null() && !key_cf.is_null() {
             let services = IOHIDEventSystemClientCopyServices(client);
             if !services.is_null() {
                 let count = CFArrayGetCount(services);
-                let key_cstr = CString::new("Product").unwrap();
-                let key_cf = CFStringCreateWithCString(
-                    std::ptr::null(),
-                    key_cstr.as_ptr(),
-                    K_CF_STRING_ENCODING_UTF8,
-                );
-
                 for i in 0..count {
                     let service = CFArrayGetValueAtIndex(services, i);
                     if service.is_null() {
@@ -79,18 +115,15 @@ pub fn read_hardware_temperatures() -> TemperatureSummary {
                         }
                     }
                 }
-
-                if !key_cf.is_null() {
-                    CFRelease(key_cf);
-                }
                 CFRelease(services);
             }
-            CFRelease(client);
         }
         objc_autoreleasePoolPop(pool);
     }
 
-    summarize_sensor_readings(sensors)
+    let summary = summarize_sensor_readings(sensors);
+    guard.last_read = Some((Instant::now(), summary.clone()));
+    summary
 }
 
 /// Deduplicate sensor names, sort descending by temperature, and compute category averages.

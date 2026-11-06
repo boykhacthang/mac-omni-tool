@@ -68,41 +68,67 @@ fn start_background_state_cache() {
         .name("omni-input-state-cache".to_string())
         .spawn(|| {
             let mut last_space_index: usize = 0;
+            let mut tick_count: u64 = 0;
             loop {
-                let (bundle_id, _) = crate::spaces::frontmost_app_info();
-                let is_finder = bundle_id == "com.apple.finder" || is_finder_frontmost();
-                CACHED_FRONTMOST_IS_FINDER.store(is_finder, Ordering::Relaxed);
-                if let Ok(mut guard) = CACHED_FRONTMOST_BUNDLE
-                    .get_or_init(|| Mutex::new(String::new()))
-                    .try_lock()
-                {
-                    *guard = bundle_id;
+                let overlay_active = OVERLAY_ESCAPE_ACTIVE.load(Ordering::SeqCst);
+                let cfg = crate::config::get_input_config();
+
+                if !cfg.needs_event_tap() && !overlay_active {
+                    std::thread::sleep(std::time::Duration::from_millis(1000));
+                    continue;
                 }
 
-                let (total_spaces, _, cur_space) = crate::spaces::query_macos_spaces_counts();
-                CACHED_TOTAL_SPACES.store(total_spaces.max(1) as i64, Ordering::Relaxed);
+                tick_count = tick_count.wrapping_add(1);
 
-                // If user switched macOS Desktop Space (e.g. via physical F3 Mission Control or trackpad swipe)
-                // while an overlay was active, immediately dismiss all overlays so no window is left stranded.
-                if last_space_index != 0 && cur_space != 0 && cur_space != last_space_index {
-                    if OVERLAY_ESCAPE_ACTIVE.load(Ordering::SeqCst) {
-                        reset_all_tap_held_states();
-                        notify_overlay_immediate(UiOverlayEvent::HideAllOverlays);
+                if cfg.finder_cut_paste_enabled || cfg.external_mouse_enabled {
+                    let (bundle_id, _) = crate::spaces::frontmost_app_info();
+                    let is_finder = bundle_id == "com.apple.finder" || is_finder_frontmost();
+                    CACHED_FRONTMOST_IS_FINDER.store(is_finder, Ordering::Relaxed);
+                    if let Ok(mut guard) = CACHED_FRONTMOST_BUNDLE
+                        .get_or_init(|| Mutex::new(String::new()))
+                        .try_lock()
+                    {
+                        if *guard != bundle_id {
+                            *guard = bundle_id;
+                        }
                     }
                 }
-                if cur_space != 0 {
-                    last_space_index = cur_space;
+
+                // Query WindowServer spaces immediately when an overlay is active (to auto-dismiss on Space swipe),
+                // or every 4th tick (~1.4s) when external mouse buttons need the total spaces count.
+                let needs_spaces_poll = overlay_active
+                    || (cfg.external_mouse_enabled
+                        && cfg.mouse_buttons_enabled
+                        && (tick_count % 4 == 1));
+                if needs_spaces_poll {
+                    let (total_spaces, _, cur_space) = crate::spaces::query_macos_spaces_counts();
+                    CACHED_TOTAL_SPACES.store(total_spaces.max(1) as i64, Ordering::Relaxed);
+
+                    // If user switched macOS Desktop Space (e.g. via physical F3 Mission Control or trackpad swipe)
+                    // while an overlay was active, immediately dismiss all overlays so no window is left stranded.
+                    if last_space_index != 0 && cur_space != 0 && cur_space != last_space_index {
+                        if OVERLAY_ESCAPE_ACTIVE.load(Ordering::SeqCst) {
+                            reset_all_tap_held_states();
+                            notify_overlay_immediate(UiOverlayEvent::HideAllOverlays);
+                        }
+                    }
+                    if cur_space != 0 {
+                        last_space_index = cur_space;
+                    }
                 }
 
-                let shortcuts = core_window::get_window_shortcuts();
-                if let Ok(mut guard) = CACHED_WINDOW_SHORTCUTS
-                    .get_or_init(|| Mutex::new(Vec::new()))
-                    .try_lock()
-                {
-                    *guard = shortcuts;
+                if cfg.window_snapping_enabled && (tick_count % 3 == 1) {
+                    let shortcuts = core_window::get_window_shortcuts();
+                    if let Ok(mut guard) = CACHED_WINDOW_SHORTCUTS
+                        .get_or_init(|| Mutex::new(Vec::new()))
+                        .try_lock()
+                    {
+                        *guard = shortcuts;
+                    }
                 }
 
-                std::thread::sleep(std::time::Duration::from_millis(200));
+                let sleep_ms = if overlay_active { 220 } else { 350 };
+                std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
             }
         });
 }

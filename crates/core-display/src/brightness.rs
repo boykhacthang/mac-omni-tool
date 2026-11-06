@@ -9,6 +9,76 @@ use std::sync::{Mutex, OnceLock};
 
 static DISPLAY_STATES: OnceLock<Mutex<HashMap<u32, DisplayColorState>>> = OnceLock::new();
 
+type DsGetBrightnessFn = unsafe extern "C" fn(u32, *mut f32) -> i32;
+type DsSetBrightnessFn = unsafe extern "C" fn(u32, f32) -> i32;
+type CdGetBrightnessFn = unsafe extern "C" fn(u32) -> f64;
+type CdSetBrightnessFn = unsafe extern "C" fn(u32, f64) -> i32;
+
+struct BrightnessSymbols {
+    ds_get: Option<DsGetBrightnessFn>,
+    ds_set: Option<DsSetBrightnessFn>,
+    cd_get: Option<CdGetBrightnessFn>,
+    cd_set: Option<CdSetBrightnessFn>,
+}
+
+static BRIGHTNESS_SYMBOLS: OnceLock<BrightnessSymbols> = OnceLock::new();
+
+fn brightness_symbols() -> &'static BrightnessSymbols {
+    BRIGHTNESS_SYMBOLS.get_or_init(|| unsafe {
+        let mut ds_get = None;
+        let mut ds_set = None;
+        let mut cd_get = None;
+        let mut cd_set = None;
+
+        if let Ok(path) = CString::new(
+            "/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices",
+        ) {
+            let handle = libc::dlopen(path.as_ptr(), libc::RTLD_LAZY);
+            if !handle.is_null() {
+                if let Ok(sym) = CString::new("DisplayServicesGetBrightness") {
+                    let ptr = libc::dlsym(handle, sym.as_ptr());
+                    if !ptr.is_null() {
+                        ds_get = Some(std::mem::transmute::<*mut std::ffi::c_void, DsGetBrightnessFn>(ptr));
+                    }
+                }
+                if let Ok(sym) = CString::new("DisplayServicesSetBrightness") {
+                    let ptr = libc::dlsym(handle, sym.as_ptr());
+                    if !ptr.is_null() {
+                        ds_set = Some(std::mem::transmute::<*mut std::ffi::c_void, DsSetBrightnessFn>(ptr));
+                    }
+                }
+            }
+        }
+
+        if let Ok(cd_path) =
+            CString::new("/System/Library/Frameworks/CoreDisplay.framework/CoreDisplay")
+        {
+            let cd_handle = libc::dlopen(cd_path.as_ptr(), libc::RTLD_LAZY);
+            if !cd_handle.is_null() {
+                if let Ok(sym) = CString::new("CoreDisplay_Display_GetUserBrightness") {
+                    let ptr = libc::dlsym(cd_handle, sym.as_ptr());
+                    if !ptr.is_null() {
+                        cd_get = Some(std::mem::transmute::<*mut std::ffi::c_void, CdGetBrightnessFn>(ptr));
+                    }
+                }
+                if let Ok(sym) = CString::new("CoreDisplay_Display_SetUserBrightness") {
+                    let ptr = libc::dlsym(cd_handle, sym.as_ptr());
+                    if !ptr.is_null() {
+                        cd_set = Some(std::mem::transmute::<*mut std::ffi::c_void, CdSetBrightnessFn>(ptr));
+                    }
+                }
+            }
+        }
+
+        BrightnessSymbols {
+            ds_get,
+            ds_set,
+            cd_get,
+            cd_set,
+        }
+    })
+}
+
 fn state_map() -> &'static Mutex<HashMap<u32, DisplayColorState>> {
     DISPLAY_STATES.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -24,83 +94,39 @@ pub fn compute_gamma_channels(software_dimming: f32, warmth: f32) -> (f32, f32, 
     (r_max, g_max, b_max)
 }
 
-/// Try reading hardware brightness via `DisplayServices` or `CoreDisplay`.
+/// Try reading hardware brightness via cached `DisplayServices` or `CoreDisplay` symbols.
 fn get_hardware_brightness(display_id: u32) -> Option<f32> {
+    let syms = brightness_symbols();
     unsafe {
-        let path = CString::new(
-            "/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices",
-        )
-        .ok()?;
-        let handle = libc::dlopen(path.as_ptr(), libc::RTLD_LAZY);
-        if !handle.is_null() {
-            let sym = CString::new("DisplayServicesGetBrightness").ok()?;
-            let func_ptr = libc::dlsym(handle, sym.as_ptr());
-            if !func_ptr.is_null() {
-                type GetBrightnessFn = unsafe extern "C" fn(u32, *mut f32) -> i32;
-                let func: GetBrightnessFn = std::mem::transmute(func_ptr);
-                let mut val: f32 = 1.0;
-                if func(display_id, &mut val) == 0 && (0.0..=1.0).contains(&val) {
-                    return Some(val);
-                }
+        if let Some(func) = syms.ds_get {
+            let mut val: f32 = 1.0;
+            if func(display_id, &mut val) == 0 && (0.0..=1.0).contains(&val) {
+                return Some(val);
             }
         }
-
-        let cd_path =
-            CString::new("/System/Library/Frameworks/CoreDisplay.framework/CoreDisplay").ok()?;
-        let cd_handle = libc::dlopen(cd_path.as_ptr(), libc::RTLD_LAZY);
-        if !cd_handle.is_null() {
-            let sym = CString::new("CoreDisplay_Display_GetUserBrightness").ok()?;
-            let func_ptr = libc::dlsym(cd_handle, sym.as_ptr());
-            if !func_ptr.is_null() {
-                type CoreDisplayGetFn = unsafe extern "C" fn(u32) -> f64;
-                let func: CoreDisplayGetFn = std::mem::transmute(func_ptr);
-                let val = func(display_id) as f32;
-                if (0.0..=1.0).contains(&val) {
-                    return Some(val);
-                }
+        if let Some(func) = syms.cd_get {
+            let val = func(display_id) as f32;
+            if (0.0..=1.0).contains(&val) {
+                return Some(val);
             }
         }
     }
     None
 }
 
-/// Try setting hardware brightness via `DisplayServices` or `CoreDisplay`.
+/// Try setting hardware brightness via cached `DisplayServices` or `CoreDisplay` symbols.
 fn set_hardware_brightness_raw(display_id: u32, brightness: f32) -> bool {
     let clamped = brightness.clamp(0.0, 1.0);
+    let syms = brightness_symbols();
     unsafe {
-        if let Ok(path) = CString::new(
-            "/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices",
-        ) {
-            let handle = libc::dlopen(path.as_ptr(), libc::RTLD_LAZY);
-            if !handle.is_null() {
-                if let Ok(sym) = CString::new("DisplayServicesSetBrightness") {
-                    let func_ptr = libc::dlsym(handle, sym.as_ptr());
-                    if !func_ptr.is_null() {
-                        type SetBrightnessFn = unsafe extern "C" fn(u32, f32) -> i32;
-                        let func: SetBrightnessFn = std::mem::transmute(func_ptr);
-                        if func(display_id, clamped) == 0 {
-                            return true;
-                        }
-                    }
-                }
+        if let Some(func) = syms.ds_set {
+            if func(display_id, clamped) == 0 {
+                return true;
             }
         }
-
-        if let Ok(cd_path) =
-            CString::new("/System/Library/Frameworks/CoreDisplay.framework/CoreDisplay")
-        {
-            let cd_handle = libc::dlopen(cd_path.as_ptr(), libc::RTLD_LAZY);
-            if !cd_handle.is_null() {
-                if let Ok(sym) = CString::new("CoreDisplay_Display_SetUserBrightness") {
-                    let func_ptr = libc::dlsym(cd_handle, sym.as_ptr());
-                    if !func_ptr.is_null() {
-                        type CoreDisplaySetFn = unsafe extern "C" fn(u32, f64) -> i32;
-                        let func: CoreDisplaySetFn = std::mem::transmute(func_ptr);
-                        if func(display_id, clamped as f64) == 0 {
-                            return true;
-                        }
-                    }
-                }
+        if let Some(func) = syms.cd_set {
+            if func(display_id, clamped as f64) == 0 {
+                return true;
             }
         }
     }

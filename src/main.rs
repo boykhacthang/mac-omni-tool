@@ -12,9 +12,9 @@ use crate::macos_window::{
     disable_macos_window_restoration, focus_and_elevate_macos_window,
     hide_floating_overlay_window, is_any_nswindow_focused, park_overlay_window_offscreen,
     place_main_window_center_75_full_height, place_overlay_on_display,
-    prepare_screenshot_window_hidden, restore_previous_frontmost_app, reveal_screenshot_window,
-    set_macos_dock_icon_visible, set_nswindow_non_restorable, set_nswindow_rounded_transparent,
-    show_floating_overlay_window, snap_nswindow_directly,
+    prepare_screenshot_window_hidden, release_process_heap_memory, restore_previous_frontmost_app,
+    reveal_screenshot_window, set_macos_dock_icon_visible, set_nswindow_non_restorable,
+    set_nswindow_rounded_transparent, show_floating_overlay_window, snap_nswindow_directly,
 };
 use crate::menubar::{
     init_native_macos_menubar_item, setup_macos_application_menu, update_status_bar_title,
@@ -25,9 +25,60 @@ use crate::webview::build_webview_with_api;
 use tao::{
     dpi::{LogicalPosition, LogicalSize},
     event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoopBuilder},
+    event_loop::{ControlFlow, EventLoopBuilder, EventLoopWindowTarget},
     window::WindowBuilder,
 };
+
+fn create_screenshot_slot_window_and_webview(
+    slot: usize,
+    x: i32,
+    y: i32,
+    width: usize,
+    height: usize,
+    autostart: bool,
+    event_loop_target: &EventLoopWindowTarget<AppUserEvent>,
+    proxy: tao::event_loop::EventLoopProxy<AppUserEvent>,
+) -> (tao::window::Window, wry::WebView) {
+    let win = WindowBuilder::new()
+        .with_title(&format!("Mac Omni Screenshot #{}", slot + 1))
+        .with_decorations(false)
+        .with_transparent(true)
+        .with_always_on_top(false)
+        .with_resizable(false)
+        .with_inner_size(LogicalSize::new(width as f64, height as f64))
+        .with_position(LogicalPosition::new(x as f64, y as f64))
+        .with_visible(false)
+        .build(event_loop_target)
+        .expect("Failed to create screenshot overlay window");
+
+    unsafe {
+        set_nswindow_rounded_transparent(&win, 0.0);
+        place_overlay_on_display(&win, x, y, width, height);
+        park_overlay_window_offscreen(&win);
+    }
+
+    let url = if autostart {
+        format!(
+            "omni://localhost/index.html?mode=screenshot_overlay&slot={}&autostart=1",
+            slot
+        )
+    } else {
+        format!(
+            "omni://localhost/index.html?mode=screenshot_overlay&slot={}",
+            slot
+        )
+    };
+    let wv = build_webview_with_api(&win, &url, proxy)
+        .expect("Failed to build Screenshot WebView");
+
+    unsafe {
+        set_nswindow_rounded_transparent(&win, 0.0);
+        place_overlay_on_display(&win, x, y, width, height);
+        park_overlay_window_offscreen(&win);
+    }
+
+    (win, wv)
+}
 
 fn main() {
     let start_minimized = std::env::args().any(|a| a == "--minimized");
@@ -240,60 +291,25 @@ fn main() {
         hide_floating_overlay_window(&alttab_window);
     }
 
-    // Window Pool 4: Multi-Monitor Screenshot Overlay Windows
+    // Window Pool 4: Multi-Monitor Screenshot Overlay Windows (created only for connected displays, expanded on demand)
     let startup_displays = core_display::list_displays();
+    let initial_screenshot_slots = startup_displays.len().clamp(1, MAX_SCREENSHOT_SLOTS);
     let mut screenshot_windows = Vec::with_capacity(MAX_SCREENSHOT_SLOTS);
     let mut screenshot_webviews = Vec::with_capacity(MAX_SCREENSHOT_SLOTS);
     let mut screenshot_ids = Vec::with_capacity(MAX_SCREENSHOT_SLOTS);
 
-    for slot in 0..MAX_SCREENSHOT_SLOTS {
+    for slot in 0..initial_screenshot_slots {
         let slot_disp = startup_displays.get(slot).unwrap_or(&cur_disp);
-        let win = WindowBuilder::new()
-            .with_title(&format!("Mac Omni Screenshot #{}", slot + 1))
-            .with_decorations(false)
-            .with_transparent(true)
-            .with_always_on_top(false)
-            .with_resizable(false)
-            .with_inner_size(LogicalSize::new(
-                slot_disp.width as f64,
-                slot_disp.height as f64,
-            ))
-            .with_position(LogicalPosition::new(slot_disp.x as f64, slot_disp.y as f64))
-            .with_visible(false)
-            .build(&event_loop)
-            .expect("Failed to create screenshot overlay window");
-
-        unsafe {
-            set_nswindow_rounded_transparent(&win, 0.0);
-            place_overlay_on_display(
-                &win,
-                slot_disp.x,
-                slot_disp.y,
-                slot_disp.width,
-                slot_disp.height,
-            );
-            park_overlay_window_offscreen(&win);
-        }
-
-        let url = format!(
-            "omni://localhost/index.html?mode=screenshot_overlay&slot={}",
-            slot
+        let (win, wv) = create_screenshot_slot_window_and_webview(
+            slot,
+            slot_disp.x,
+            slot_disp.y,
+            slot_disp.width,
+            slot_disp.height,
+            false,
+            &event_loop,
+            proxy.clone(),
         );
-        let wv = build_webview_with_api(&win, &url, proxy.clone())
-            .expect("Failed to build Screenshot WebView");
-
-        unsafe {
-            set_nswindow_rounded_transparent(&win, 0.0);
-            place_overlay_on_display(
-                &win,
-                slot_disp.x,
-                slot_disp.y,
-                slot_disp.width,
-                slot_disp.height,
-            );
-            park_overlay_window_offscreen(&win);
-        }
-
         screenshot_ids.push(win.id());
         screenshot_windows.push(win);
         screenshot_webviews.push(wv);
@@ -304,7 +320,7 @@ fn main() {
     let alttab_id = alttab_window.id();
     let mini_id = mini_window.id();
 
-    event_loop.run(move |event, _, control_flow| {
+    event_loop.run(move |event, event_loop_target, control_flow| {
         *control_flow = ControlFlow::Wait;
 
         match event {
@@ -316,6 +332,9 @@ fn main() {
                             unsafe {
                                 hide_floating_overlay_window(&mini_window);
                             }
+                            let _ = mini_webview.evaluate_script(
+                                "window.__onMiniPopoverHidden && window.__onMiniPopoverHidden();",
+                            );
                         }
                         return;
                     }
@@ -324,6 +343,9 @@ fn main() {
                         unsafe {
                             hide_floating_overlay_window(&mini_window);
                         }
+                        let _ = mini_webview.evaluate_script(
+                            "window.__onMiniPopoverHidden && window.__onMiniPopoverHidden();",
+                        );
                     } else {
                         let (mx, _my) = core_display::get_mouse_cursor_position();
                         let disp = core_display::get_display_at_mouse_cursor();
@@ -348,6 +370,9 @@ fn main() {
                             show_floating_overlay_window(&mini_window, 14.0);
                         } else {
                             hide_floating_overlay_window(&mini_window);
+                            let _ = mini_webview.evaluate_script(
+                                "window.__onMiniPopoverHidden && window.__onMiniPopoverHidden();",
+                            );
                         }
                     }
                 }
@@ -373,10 +398,14 @@ fn main() {
                     let (visible, _) = crate::menubar::sync_menubar_from_config(&cfg);
                     if !visible && mini_window.is_visible() {
                         mini_window.set_visible(false);
+                        let _ = mini_webview.evaluate_script(
+                            "window.__onMiniPopoverHidden && window.__onMiniPopoverHidden();",
+                        );
+                    } else if mini_window.is_visible() {
+                        let _ = mini_webview.evaluate_script(
+                            "window.__refreshMiniPopover && window.__refreshMiniPopover();",
+                        );
                     }
-                    let _ = mini_webview.evaluate_script(
-                        "window.__refreshMiniPopover && window.__refreshMiniPopover();",
-                    );
                 }
                 AppUserEvent::SetAppTheme(theme) => {
                     let script = format!(
@@ -419,6 +448,10 @@ fn main() {
                         unsafe {
                             set_macos_dock_icon_visible(false);
                         }
+                        let _ = main_webview.evaluate_script(
+                            "window.__onMainWindowHidden && window.__onMainWindowHidden();",
+                        );
+                        release_process_heap_memory();
                     } else {
                         unsafe {
                             set_macos_dock_icon_visible(true);
@@ -470,6 +503,10 @@ fn main() {
                     unsafe {
                         set_macos_dock_icon_visible(false);
                     }
+                    let _ = main_webview.evaluate_script(
+                        "window.__onMainWindowHidden && window.__onMainWindowHidden();",
+                    );
+                    release_process_heap_memory();
                 }
                 AppUserEvent::QuitApp => {
                     *control_flow = ControlFlow::Exit;
@@ -480,6 +517,9 @@ fn main() {
                             unsafe {
                                 hide_floating_overlay_window(&clip_window);
                             }
+                            let _ = clip_webview.evaluate_script(
+                                "window.__onDrawerHidden && window.__onDrawerHidden();",
+                            );
                             if !alttab_window.is_visible()
                                 && !screenshot_windows.iter().any(|w| w.is_visible())
                             {
@@ -493,6 +533,9 @@ fn main() {
                         unsafe {
                             hide_floating_overlay_window(&clip_window);
                         }
+                        let _ = clip_webview.evaluate_script(
+                            "window.__onDrawerHidden && window.__onDrawerHidden();",
+                        );
                         if !alttab_window.is_visible()
                             && !screenshot_windows.iter().any(|w| w.is_visible())
                         {
@@ -518,6 +561,9 @@ fn main() {
                     unsafe {
                         hide_floating_overlay_window(&clip_window);
                     }
+                    let _ = clip_webview.evaluate_script(
+                        "window.__onDrawerHidden && window.__onDrawerHidden();",
+                    );
                     if !alttab_window.is_visible()
                         && !screenshot_windows.iter().any(|w| w.is_visible())
                     {
@@ -532,6 +578,9 @@ fn main() {
                             unsafe {
                                 hide_floating_overlay_window(&alttab_window);
                             }
+                            let _ = alttab_webview.evaluate_script(
+                                "window.__onAltTabHidden && window.__onAltTabHidden();",
+                            );
                             if !clip_window.is_visible()
                                 && !screenshot_windows.iter().any(|w| w.is_visible())
                             {
@@ -569,6 +618,9 @@ fn main() {
                     unsafe {
                         hide_floating_overlay_window(&alttab_window);
                     }
+                    let _ = alttab_webview.evaluate_script(
+                        "window.__onAltTabHidden && window.__onAltTabHidden();",
+                    );
                     if !clip_window.is_visible()
                         && !screenshot_windows.iter().any(|w| w.is_visible())
                     {
@@ -601,16 +653,25 @@ fn main() {
                         unsafe {
                             hide_floating_overlay_window(&mini_window);
                         }
+                        let _ = mini_webview.evaluate_script(
+                            "window.__onMiniPopoverHidden && window.__onMiniPopoverHidden();",
+                        );
                     }
                     if clip_window.is_visible() {
                         unsafe {
                             hide_floating_overlay_window(&clip_window);
                         }
+                        let _ = clip_webview.evaluate_script(
+                            "window.__onDrawerHidden && window.__onDrawerHidden();",
+                        );
                     }
                     if alttab_window.is_visible() {
                         unsafe {
                             hide_floating_overlay_window(&alttab_window);
                         }
+                        let _ = alttab_webview.evaluate_script(
+                            "window.__onAltTabHidden && window.__onAltTabHidden();",
+                        );
                     }
 
                     let prev_pid = core_window::frontmost_application_pid();
@@ -725,16 +786,25 @@ fn main() {
                         unsafe {
                             hide_floating_overlay_window(&mini_window);
                         }
+                        let _ = mini_webview.evaluate_script(
+                            "window.__onMiniPopoverHidden && window.__onMiniPopoverHidden();",
+                        );
                     }
                     if clip_window.is_visible() {
                         unsafe {
                             hide_floating_overlay_window(&clip_window);
                         }
+                        let _ = clip_webview.evaluate_script(
+                            "window.__onDrawerHidden && window.__onDrawerHidden();",
+                        );
                     }
                     if alttab_window.is_visible() {
                         unsafe {
                             hide_floating_overlay_window(&alttab_window);
                         }
+                        let _ = alttab_webview.evaluate_script(
+                            "window.__onAltTabHidden && window.__onAltTabHidden();",
+                        );
                     }
 
                     let prev_pid = core_window::frontmost_application_pid();
@@ -798,7 +868,7 @@ fn main() {
                     seq,
                     fullscreen_picker_mode,
                 } => {
-                    let slot_infos: Vec<(usize, i32, i32, usize, usize, String, bool)> = {
+                    let slot_infos: Vec<(usize, u32, i32, i32, usize, usize, String, bool)> = {
                         let sess = screenshot_session().lock().unwrap();
                         if sess.capture_seq != seq || sess.slots.is_empty() {
                             return;
@@ -809,6 +879,7 @@ fn main() {
                             .map(|(idx, s)| {
                                 (
                                     idx,
+                                    s.display_id,
                                     s.x,
                                     s.y,
                                     s.width,
@@ -820,9 +891,28 @@ fn main() {
                             .collect()
                     };
 
+                    while screenshot_windows.len() < slot_infos.len().min(MAX_SCREENSHOT_SLOTS) {
+                        let next_slot = screenshot_windows.len();
+                        let (_, _, x, y, width, height, _, _) = slot_infos[next_slot];
+                        let (win, wv) = create_screenshot_slot_window_and_webview(
+                            next_slot,
+                            x,
+                            y,
+                            width,
+                            height,
+                            true,
+                            event_loop_target,
+                            proxy.clone(),
+                        );
+                        screenshot_ids.push(win.id());
+                        screenshot_windows.push(win);
+                        screenshot_webviews.push(wv);
+                    }
+
                     core_input::set_overlay_escape_hotkey_active(true);
 
-                    for (slot_idx, x, y, width, height, disp_name, preselect_full) in slot_infos {
+                    for (slot_idx, _, x, y, width, height, disp_name, preselect_full) in slot_infos
+                    {
                         let win = &screenshot_windows[slot_idx];
                         let wv = &screenshot_webviews[slot_idx];
 
@@ -869,7 +959,7 @@ fn main() {
                         if sess.capture_seq != seq || sess.slots.is_empty() {
                             (None, None)
                         } else if sess.revealed {
-                            let count = sess.expected_slots.min(MAX_SCREENSHOT_SLOTS);
+                            let count = sess.expected_slots.min( screenshot_windows.len());
                             if slot < count {
                                 (None, Some(slot))
                             } else {
@@ -896,7 +986,7 @@ fn main() {
                     };
 
                     if let Some((num_slots, target_slot)) = reveal_params {
-                        let count = num_slots.min(MAX_SCREENSHOT_SLOTS);
+                        let count = num_slots.min(screenshot_windows.len());
                         for idx in 0..count {
                             if idx != target_slot {
                                 unsafe {
@@ -941,6 +1031,9 @@ fn main() {
                         unsafe {
                             hide_floating_overlay_window(&mini_window);
                         }
+                        let _ = mini_webview.evaluate_script(
+                            "window.__onMiniPopoverHidden && window.__onMiniPopoverHidden();",
+                        );
                     }
                     unsafe {
                         set_macos_dock_icon_visible(true);
@@ -978,7 +1071,7 @@ fn main() {
                 AppUserEvent::SetActiveScreenshotSlot(active_slot) => {
                     let (changed, active_count) = {
                         let mut sess = screenshot_session().lock().unwrap();
-                        let count = sess.expected_slots.min(MAX_SCREENSHOT_SLOTS);
+                        let count = sess.expected_slots.min(screenshot_windows.len());
                         if !sess.revealed || sess.active_slot == Some(active_slot) {
                             (false, count)
                         } else {
@@ -1026,6 +1119,7 @@ fn main() {
                     if !clip_window.is_visible() && !alttab_window.is_visible() {
                         core_input::set_overlay_escape_hotkey_active(false);
                     }
+                    release_process_heap_memory();
                 }
                 AppUserEvent::SnapOwnMainWindow(layout) => {
                     if core_input::get_input_config().window_snapping_enabled
@@ -1056,6 +1150,15 @@ fn main() {
                         hide_floating_overlay_window(&clip_window);
                         hide_floating_overlay_window(&alttab_window);
                     }
+                    let _ = mini_webview.evaluate_script(
+                        "window.__onMiniPopoverHidden && window.__onMiniPopoverHidden();",
+                    );
+                    let _ = clip_webview.evaluate_script(
+                        "window.__onDrawerHidden && window.__onDrawerHidden();",
+                    );
+                    let _ = alttab_webview.evaluate_script(
+                        "window.__onAltTabHidden && window.__onAltTabHidden();",
+                    );
                     for win in &screenshot_windows {
                         unsafe {
                             park_overlay_window_offscreen(win);
@@ -1074,6 +1177,7 @@ fn main() {
                         }
                     }
                     core_input::set_overlay_escape_hotkey_active(false);
+                    release_process_heap_memory();
                 }
             },
             Event::WindowEvent {
@@ -1085,6 +1189,9 @@ fn main() {
                     unsafe {
                         hide_floating_overlay_window(&clip_window);
                     }
+                    let _ = clip_webview.evaluate_script(
+                        "window.__onDrawerHidden && window.__onDrawerHidden();",
+                    );
                     if !alttab_window.is_visible()
                         && !screenshot_windows.iter().any(|w| w.is_visible())
                     {
@@ -1094,6 +1201,9 @@ fn main() {
                     unsafe {
                         hide_floating_overlay_window(&alttab_window);
                     }
+                    let _ = alttab_webview.evaluate_script(
+                        "window.__onAltTabHidden && window.__onAltTabHidden();",
+                    );
                     if !clip_window.is_visible()
                         && !screenshot_windows.iter().any(|w| w.is_visible())
                     {
@@ -1103,6 +1213,9 @@ fn main() {
                     unsafe {
                         hide_floating_overlay_window(&mini_window);
                     }
+                    let _ = mini_webview.evaluate_script(
+                        "window.__onMiniPopoverHidden && window.__onMiniPopoverHidden();",
+                    );
                 } else if screenshot_ids.contains(&window_id) {
                     let prev_pid = {
                         let mut sess = screenshot_session().lock().unwrap();
@@ -1128,6 +1241,7 @@ fn main() {
                     if !clip_window.is_visible() && !alttab_window.is_visible() {
                         core_input::set_overlay_escape_hotkey_active(false);
                     }
+                    release_process_heap_memory();
                 } else if window_id == main_id {
                     let cfg = core_input::get_input_config();
                     if cfg.keep_running_in_background {
@@ -1135,6 +1249,10 @@ fn main() {
                         unsafe {
                             set_macos_dock_icon_visible(false);
                         }
+                        let _ = main_webview.evaluate_script(
+                            "window.__onMainWindowHidden && window.__onMainWindowHidden();",
+                        );
+                        release_process_heap_memory();
                     } else {
                         *control_flow = ControlFlow::Exit;
                     }
@@ -1172,10 +1290,16 @@ fn main() {
                     unsafe {
                         hide_floating_overlay_window(&mini_window);
                     }
+                    let _ = mini_webview.evaluate_script(
+                        "window.__onMiniPopoverHidden && window.__onMiniPopoverHidden();",
+                    );
                 } else if window_id == clip_id && clip_window.is_visible() {
                     unsafe {
                         hide_floating_overlay_window(&clip_window);
                     }
+                    let _ = clip_webview.evaluate_script(
+                        "window.__onDrawerHidden && window.__onDrawerHidden();",
+                    );
                     if !alttab_window.is_visible()
                         && !screenshot_windows.iter().any(|w| w.is_visible())
                     {
@@ -1185,6 +1309,9 @@ fn main() {
                     unsafe {
                         hide_floating_overlay_window(&alttab_window);
                     }
+                    let _ = alttab_webview.evaluate_script(
+                        "window.__onAltTabHidden && window.__onAltTabHidden();",
+                    );
                     if !clip_window.is_visible()
                         && !screenshot_windows.iter().any(|w| w.is_visible())
                     {

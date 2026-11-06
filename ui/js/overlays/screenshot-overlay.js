@@ -891,6 +891,12 @@ function initScreenshotOverlay() {
     textEditor.style.display = "none";
     textTargetPos = null;
     bgLoaded = false;
+    if (bgImage) {
+      bgImage.onload = null;
+      bgImage.onerror = null;
+      bgImage.src = "";
+    }
+    bgImage = new Image();
     sel = null;
     annotations = [];
     draftAnnotation = null;
@@ -902,6 +908,12 @@ function initScreenshotOverlay() {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.restore();
+    // Shrink canvas backing store to 1x1 while hidden so WebKit.GPU & WindowServer
+    // immediately release the 25-68 MB Retina IOSurface buffer.
+    mosaicCanvas.width = 1;
+    mosaicCanvas.height = 1;
+    canvas.width = 1;
+    canvas.height = 1;
   };
 
   function syncScreenshotLabels(targetSlot = SLOT_INDEX, labelName = "") {
@@ -1047,9 +1059,11 @@ function initScreenshotOverlay() {
     nextImg.src = imgUrl;
   };
 
-  setupCanvasDimensions(window.innerWidth, window.innerHeight);
-  // Pre-warm GPU CAMetalLayer backing store at startup so the first screenshot never flashes
-  ctx.fillStyle = "rgba(0,0,0,0)";
-  ctx.fillRect(0, 0, 1, 1);
+  // Keep canvas at 1x1 until an active screenshot session starts so idle WebViews consume minimal GPU memory
+  canvas.width = 1;
+  canvas.height = 1;
+  if (new URLSearchParams(window.location.search).get("autostart") === "1") {
+    window.__startScreenshotSession();
+  }
 }
 

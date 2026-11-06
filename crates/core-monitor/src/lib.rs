@@ -8,7 +8,7 @@ pub mod models;
 pub mod processes;
 pub mod sensors;
 
-pub use dashboard::{get_hardware_dashboard, get_menubar_stats};
+pub use dashboard::{get_hardware_dashboard, get_menubar_stats, release_dashboard_memory};
 pub use gpu::{extract_ioreg_str, extract_ioreg_u64, parse_ioreg_gpu_output, read_gpu_info};
 pub use models::{
     BatteryInfo, GpuInfo, HardwareDashboardData, MenuBarQuickStats, ProcessEntry,
