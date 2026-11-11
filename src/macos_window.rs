@@ -517,6 +517,64 @@ pub unsafe fn hide_floating_overlay_window(window: &Window) {
     window.set_visible(false);
 }
 
+/// Detach and release the `CAMetalLayer` (and its backing `IOSurface` swapchain drawables)
+/// from `window.contentView` when the window is hidden to the background.
+/// When the window is later shown again, `wgpu::Instance::create_surface` automatically
+/// creates and attaches a fresh `CAMetalLayer`.
+pub unsafe fn release_nswindow_metal_layer(window: &Window) {
+    let pool = objc_autoreleasePoolPush();
+    let ns_win = get_ns_window(window);
+    if !ns_win.is_null() {
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct ObjcSize {
+            width: f64,
+            height: f64,
+        }
+        type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+        type Msg1Ptr = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
+        type Msg1Size = unsafe extern "C" fn(*mut c_void, *mut c_void, ObjcSize);
+        let msg0: Msg0 = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_ptr: Msg1Ptr = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_size: Msg1Size = std::mem::transmute(objc_msgSend as *const c_void);
+
+        let content_view = msg0(ns_win, sel_registerName(c"contentView".as_ptr()));
+        if !content_view.is_null() {
+            let old_layer = msg0(content_view, sel_registerName(c"layer".as_ptr()));
+            if !old_layer.is_null() {
+                msg1_size(
+                    old_layer,
+                    sel_registerName(c"setDrawableSize:".as_ptr()),
+                    ObjcSize {
+                        width: 0.0,
+                        height: 0.0,
+                    },
+                );
+                msg1_ptr(
+                    old_layer,
+                    sel_registerName(c"setContents:".as_ptr()),
+                    std::ptr::null_mut(),
+                );
+                msg1_ptr(
+                    old_layer,
+                    sel_registerName(c"setDelegate:".as_ptr()),
+                    std::ptr::null_mut(),
+                );
+            }
+            let ca_layer_cls = objc_getClass(c"CALayer".as_ptr());
+            if !ca_layer_cls.is_null() {
+                let empty_layer = msg0(ca_layer_cls, sel_registerName(c"layer".as_ptr()));
+                msg1_ptr(
+                    content_view,
+                    sel_registerName(c"setLayer:".as_ptr()),
+                    empty_layer,
+                );
+            }
+        }
+    }
+    objc_autoreleasePoolPop(pool);
+}
+
 /// Show a floating popup/drawer window (`mini_window`, `clip_window`, `alttab_window`)
 /// and restore its opacity and mouse event handling.
 pub unsafe fn show_floating_overlay_window(window: &Window, corner_radius: f64) {

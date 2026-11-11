@@ -47,6 +47,33 @@ pub fn sort_process_entries(processes: &mut [ProcessEntry], sort_by: &str) {
     }
 }
 
+/// Query `ri_phys_footprint` via `proc_pid_rusage(RUSAGE_INFO_V2)` on macOS so process RAM
+/// matches macOS Activity Monitor's "Memory" column (`phys_footprint`) instead of raw RSS
+/// (which inflates GUI apps by ~55 MB of shared read-only dyld system framework pages).
+#[cfg(target_os = "macos")]
+fn query_macos_phys_footprint(pid: u32) -> Option<u64> {
+    let mut rusage = std::mem::MaybeUninit::<libc::rusage_info_v2>::uninit();
+    let ret = unsafe {
+        libc::proc_pid_rusage(
+            pid as i32,
+            libc::RUSAGE_INFO_V2,
+            rusage.as_mut_ptr() as *mut libc::rusage_info_t,
+        )
+    };
+    if ret == 0 {
+        let info = unsafe { rusage.assume_init() };
+        if info.ri_phys_footprint > 0 {
+            return Some(info.ri_phys_footprint);
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+fn query_macos_phys_footprint(_pid: u32) -> Option<u64> {
+    None
+}
+
 /// Collect and sort the top `limit` processes from `sysinfo::System`.
 pub fn collect_top_processes(
     sys: &System,
@@ -67,7 +94,7 @@ pub fn collect_top_processes(
             if name.is_empty() {
                 return None;
             }
-            let mem = proc_info.memory();
+            let mem = query_macos_phys_footprint(pid_u32).unwrap_or_else(|| proc_info.memory());
             let disk = proc_info.disk_usage();
             let exe_path = proc_info
                 .exe()

@@ -301,11 +301,19 @@ impl DashboardState {
 
     pub fn switch_tab(&mut self, tab: DashboardTab) {
         if self.active_tab != tab {
+            if self.active_tab == DashboardTab::Hardware {
+                self.hw_data = None;
+                core_monitor::release_dashboard_memory();
+            }
             if self.active_tab == DashboardTab::Clipboard {
                 self.clip_textures.clear();
             }
             if self.active_tab == DashboardTab::Cleaner {
                 self.app_icon_textures.clear();
+            }
+            if self.active_tab == DashboardTab::Mouse {
+                self.running_apps.clear();
+                self.installed_gui_apps.clear();
             }
             self.active_tab = tab;
             self.recording_shortcut = None;

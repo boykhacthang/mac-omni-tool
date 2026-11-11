@@ -414,11 +414,27 @@ impl WindowGpuSurface {
         }
     }
 
-    /// Drop the Metal `wgpu::Surface` (`CAMetalLayer` swapchain drawables) when the window is hidden
-    /// to the background so hidden windows consume ~0 MB of swapchain VRAM, while keeping `egui_ctx`
-    /// and `renderer` warm so reopening any window or screenshot overlay is instant (< 1ms).
+    /// Drop the Metal `wgpu::Surface` (`CAMetalLayer` swapchain drawables), `egui_wgpu::Renderer`
+    /// (GPU textures/buffers), and `egui::Context` caches when the window is hidden to the background
+    /// so hidden windows consume 0 MB of swapchain `IOSurface`s, 0 MB of `wgpu::Texture`s, and 0 MB of CPU caches.
     pub fn suspend_surface(&mut self, gpu: &GpuContext) {
         self.surface = None;
+        self.renderer = None;
+        self.egui_ctx = egui::Context::default();
+        let viewport_id = self.egui_ctx.viewport_id();
+        self.egui_state = egui_winit::State::new(
+            self.egui_ctx.clone(),
+            viewport_id,
+            self.window.as_ref(),
+            Some(self.window.scale_factor() as f32),
+            None,
+            Some(1024),
+        );
+        self.fonts_loaded = false;
+        self.last_theme_light = None;
+        unsafe {
+            crate::macos_window::release_nswindow_metal_layer(&self.window);
+        }
         gpu.trim_command_queue();
     }
 
@@ -577,12 +593,10 @@ impl WindowGpuSurface {
 
         gpu.queue.submit(std::iter::once(encoder.finish()));
         output_frame.present();
-        let _ = gpu.device.poll(wgpu::Maintain::Wait);
+        gpu.trim_command_queue();
 
         if min_repaint_delay.is_zero() {
             self.window.request_redraw();
-        } else if min_repaint_delay >= std::time::Duration::from_millis(50) {
-            gpu.trim_command_queue();
         }
         min_repaint_delay
     }
