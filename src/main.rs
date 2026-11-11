@@ -173,6 +173,7 @@ impl OmniGpuApp {
             set_macos_dock_icon_visible(!self.start_minimized);
             setup_macos_application_menu();
         }
+        core_input::register_native_carbon_hotkeys();
         let main_surf = WindowGpuSurface::new(&self.gpu, main_win.clone(), false, !self.start_minimized);
         if !self.start_minimized {
             main_win.request_redraw();
@@ -271,7 +272,7 @@ impl OmniGpuApp {
     fn any_screenshot_visible(&self) -> bool {
         self.screenshot_surfaces
             .iter()
-            .any(|s| s.window.is_visible().unwrap_or(false))
+            .any(|s| s.surface.is_some() || s.window.is_visible().unwrap_or(false))
     }
 
     fn hide_mini_popover(&mut self) {
@@ -378,6 +379,7 @@ impl OmniGpuApp {
                 }
                 setup_macos_application_menu();
             }
+            core_input::register_native_carbon_hotkeys();
             main.ensure_surface(&self.gpu);
             main.window.set_visible(true);
             main.window.focus_window();
@@ -393,6 +395,7 @@ impl OmniGpuApp {
             unsafe {
                 set_macos_dock_icon_visible(false);
             }
+            core_input::register_native_carbon_hotkeys();
             self.dashboard_ui.on_hidden();
             release_process_heap_memory();
         }
@@ -668,10 +671,6 @@ impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
                 {
                     return;
                 }
-                if !core_window::is_screen_recording_granted() {
-                    let _ = self.proxy.send_event(AppUserEvent::ScreenshotCaptureFailed);
-                    return;
-                }
                 {
                     let mut sess = screenshot_session().lock().unwrap();
                     if sess.capturing || sess.revealed {
@@ -779,10 +778,6 @@ impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
             AppUserEvent::TriggerScreenshotOverlay => {
                 let cfg = core_input::get_input_config();
                 if !cfg.screenshot_enabled || !cfg.screenshot_region_enabled {
-                    return;
-                }
-                if !core_window::is_screen_recording_granted() {
-                    let _ = self.proxy.send_event(AppUserEvent::ScreenshotCaptureFailed);
                     return;
                 }
                 {
@@ -906,6 +901,7 @@ impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
                                 s.width,
                                 s.height,
                             );
+                            reveal_screenshot_window(&surf.window, slot_idx == target_slot);
                         }
                         surf.window.set_visible(true);
                         surf.ensure_surface(&self.gpu);
@@ -915,19 +911,13 @@ impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
                                 ui_slot.render(ctx, proxy);
                             });
                         }
+                        surf.window.request_redraw();
                     }
                 }
                 release_process_heap_memory();
 
-                // Atomically reveal all displays now that their Metal textures are rendered
+                // Ensure the target display window has active key focus
                 let count = self.screenshot_surfaces.len();
-                for idx in 0..count {
-                    if idx != target_slot {
-                        unsafe {
-                            reveal_screenshot_window(&self.screenshot_surfaces[idx].window, false);
-                        }
-                    }
-                }
                 if target_slot < count {
                     unsafe {
                         reveal_screenshot_window(
@@ -1134,40 +1124,50 @@ impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
                 let mut delay = std::time::Duration::MAX;
                 if Some(window_id) == main_id {
                     if let Some(surf) = &mut self.main_surface {
-                        let ui_state = &mut self.dashboard_ui;
-                        delay = surf.render_frame(&self.gpu, [0.06, 0.09, 0.16, 1.0], |ctx| {
-                            ui_state.render(ctx, &proxy);
-                        });
+                        if surf.surface.is_some() {
+                            let ui_state = &mut self.dashboard_ui;
+                            delay = surf.render_frame(&self.gpu, [0.06, 0.09, 0.16, 1.0], |ctx| {
+                                ui_state.render(ctx, &proxy);
+                            });
+                        }
                     }
                 } else if Some(window_id) == mini_id {
                     if let Some(surf) = &mut self.mini_surface {
-                        let ui_state = &mut self.mini_ui;
-                        delay = surf.render_frame(&self.gpu, [0.0, 0.0, 0.0, 0.0], |ctx| {
-                            ui_state.render(ctx, &proxy);
-                        });
+                        if surf.surface.is_some() {
+                            let ui_state = &mut self.mini_ui;
+                            delay = surf.render_frame(&self.gpu, [0.0, 0.0, 0.0, 0.0], |ctx| {
+                                ui_state.render(ctx, &proxy);
+                            });
+                        }
                     }
                 } else if Some(window_id) == clip_id {
                     if let Some(surf) = &mut self.clip_surface {
-                        let ui_state = &mut self.clip_ui;
-                        delay = surf.render_frame(&self.gpu, [0.0, 0.0, 0.0, 0.0], |ctx| {
-                            ui_state.render(ctx, &proxy);
-                        });
+                        if surf.surface.is_some() {
+                            let ui_state = &mut self.clip_ui;
+                            delay = surf.render_frame(&self.gpu, [0.0, 0.0, 0.0, 0.0], |ctx| {
+                                ui_state.render(ctx, &proxy);
+                            });
+                        }
                     }
                 } else if Some(window_id) == alttab_id {
                     if let Some(surf) = &mut self.alttab_surface {
-                        let ui_state = &mut self.alttab_ui;
-                        delay = surf.render_frame(&self.gpu, [0.0, 0.0, 0.0, 0.0], |ctx| {
-                            ui_state.render(ctx, &proxy);
-                        });
+                        if surf.surface.is_some() {
+                            let ui_state = &mut self.alttab_ui;
+                            delay = surf.render_frame(&self.gpu, [0.0, 0.0, 0.0, 0.0], |ctx| {
+                                ui_state.render(ctx, &proxy);
+                            });
+                        }
                     }
                 } else if let Some(idx) = screenshot_idx {
                     if let (Some(surf), Some(ui_slot)) = (
                         self.screenshot_surfaces.get_mut(idx),
                         self.screenshot_ui.slots.get_mut(idx),
                     ) {
-                        delay = surf.render_frame(&self.gpu, [0.0, 0.0, 0.0, 1.0], |ctx| {
-                            ui_slot.render(ctx, &proxy);
-                        });
+                        if surf.surface.is_some() {
+                            delay = surf.render_frame(&self.gpu, [0.0, 0.0, 0.0, 1.0], |ctx| {
+                                ui_slot.render(ctx, &proxy);
+                            });
+                        }
                     }
                 }
                 self.record_repaint_delay(delay);

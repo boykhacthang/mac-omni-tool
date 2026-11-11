@@ -173,28 +173,19 @@ pub fn trigger_system_action(action: &str) {
         }
         "screenshot" | "screenshot_region" => {
             let cfg = get_input_config();
-            if cfg.screenshot_enabled
-                && cfg.screenshot_region_enabled
-                && core_window::is_screen_recording_granted()
-            {
+            if cfg.screenshot_enabled && cfg.screenshot_region_enabled {
                 notify_overlay(UiOverlayEvent::TriggerScreenshotOverlay);
             }
         }
         "screenshot_full_edit" => {
             let cfg = get_input_config();
-            if cfg.screenshot_enabled
-                && cfg.screenshot_fullscreen_edit_enabled
-                && core_window::is_screen_recording_granted()
-            {
+            if cfg.screenshot_enabled && cfg.screenshot_fullscreen_edit_enabled {
                 notify_overlay(UiOverlayEvent::TriggerFullscreenEditScreenshot);
             }
         }
         "screenshot_full_copy" => {
             let cfg = get_input_config();
-            if cfg.screenshot_enabled
-                && cfg.screenshot_fullscreen_copy_enabled
-                && core_window::is_screen_recording_granted()
-            {
+            if cfg.screenshot_enabled && cfg.screenshot_fullscreen_copy_enabled {
                 notify_overlay(UiOverlayEvent::TriggerFullscreenCopyScreenshot);
             }
         }

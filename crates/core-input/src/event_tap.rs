@@ -18,6 +18,16 @@ static TAP_RUNNING: AtomicBool = AtomicBool::new(false);
 static TAP_ATTEMPTED_WHILE_TRUSTED: AtomicBool = AtomicBool::new(false);
 static STATE_CACHE_RUNNING: AtomicBool = AtomicBool::new(false);
 static ALTTAB_MODIFIER_HELD: AtomicBool = AtomicBool::new(false);
+static SIGNAL_SCREENSHOT_PENDING: AtomicBool = AtomicBool::new(false);
+static SIGNAL_ESCAPE_PENDING: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn handle_sigusr1(_sig: i32) {
+    SIGNAL_SCREENSHOT_PENDING.store(true, Ordering::SeqCst);
+}
+
+extern "C" fn handle_sigusr2(_sig: i32) {
+    SIGNAL_ESCAPE_PENDING.store(true, Ordering::SeqCst);
+}
 
 static LEFT_DOWN_AT_MS: AtomicI64 = AtomicI64::new(0);
 static RIGHT_DOWN_AT_MS: AtomicI64 = AtomicI64::new(0);
@@ -64,16 +74,30 @@ fn start_background_state_cache() {
     if STATE_CACHE_RUNNING.swap(true, Ordering::SeqCst) {
         return;
     }
+    unsafe {
+        libc::signal(libc::SIGUSR1, handle_sigusr1 as *const () as usize);
+        libc::signal(libc::SIGUSR2, handle_sigusr2 as *const () as usize);
+    }
     let _ = std::thread::Builder::new()
         .name("omni-input-state-cache".to_string())
         .spawn(|| {
             let mut last_space_index: usize = 0;
+            let mut was_overlay_active = false;
             let mut tick_count: u64 = 0;
             loop {
+                if SIGNAL_SCREENSHOT_PENDING.swap(false, Ordering::SeqCst) {
+                    notify_overlay(UiOverlayEvent::TriggerScreenshotOverlay);
+                }
+                if SIGNAL_ESCAPE_PENDING.swap(false, Ordering::SeqCst) {
+                    reset_all_tap_held_states();
+                    notify_overlay_immediate(UiOverlayEvent::HideAllOverlays);
+                }
+
                 let overlay_active = OVERLAY_ESCAPE_ACTIVE.load(Ordering::SeqCst);
                 let cfg = crate::config::get_input_config();
 
                 if !cfg.needs_event_tap() && !overlay_active {
+                    was_overlay_active = false;
                     std::thread::sleep(std::time::Duration::from_millis(1000));
                     continue;
                 }
@@ -105,8 +129,13 @@ fn start_background_state_cache() {
                     CACHED_TOTAL_SPACES.store(total_spaces.max(1) as i64, Ordering::Relaxed);
 
                     // If user switched macOS Desktop Space (e.g. via physical F3 Mission Control or trackpad swipe)
-                    // while an overlay was active, immediately dismiss all overlays so no window is left stranded.
-                    if last_space_index != 0 && cur_space != 0 && cur_space != last_space_index {
+                    // while an overlay was ALREADY active, immediately dismiss all overlays so no window is left stranded.
+                    if was_overlay_active
+                        && overlay_active
+                        && last_space_index != 0
+                        && cur_space != 0
+                        && cur_space != last_space_index
+                    {
                         if OVERLAY_ESCAPE_ACTIVE.load(Ordering::SeqCst) {
                             reset_all_tap_held_states();
                             notify_overlay_immediate(UiOverlayEvent::HideAllOverlays);
@@ -116,6 +145,7 @@ fn start_background_state_cache() {
                         last_space_index = cur_space;
                     }
                 }
+                was_overlay_active = overlay_active;
 
                 if cfg.window_snapping_enabled && (tick_count % 3 == 1) {
                     let shortcuts = core_window::get_window_shortcuts();
@@ -382,22 +412,41 @@ unsafe extern "C" fn event_tap_callback(
             }
 
             if let Some(combo) = keycode_and_flags_to_shortcut(keycode, flags) {
-                if cfg.screenshot_enabled && core_window::is_screen_recording_granted() {
-                    if cfg.screenshot_region_enabled
-                        && shortcuts_match(&combo, &cfg.screenshot_shortcut)
-                    {
+                if cfg.screenshot_enabled {
+                    let region_match = shortcuts_match(&combo, &cfg.screenshot_shortcut)
+                        || (shortcuts_match(&cfg.screenshot_shortcut, "Cmd+Shift+0")
+                            && shortcuts_match(&combo, "Ctrl+Shift+0"))
+                        || (shortcuts_match(&cfg.screenshot_shortcut, "Ctrl+Shift+0")
+                            && shortcuts_match(&combo, "Cmd+Shift+0"));
+                    if cfg.screenshot_region_enabled && region_match {
                         notify_overlay(UiOverlayEvent::TriggerScreenshotOverlay);
                         return std::ptr::null_mut();
                     }
-                    if cfg.screenshot_fullscreen_edit_enabled
-                        && shortcuts_match(&combo, &cfg.screenshot_fullscreen_edit_shortcut)
-                    {
+                    let edit_match =
+                        shortcuts_match(&combo, &cfg.screenshot_fullscreen_edit_shortcut)
+                            || (shortcuts_match(
+                                &cfg.screenshot_fullscreen_edit_shortcut,
+                                "Cmd+Shift+9",
+                            ) && shortcuts_match(&combo, "Ctrl+Shift+9"))
+                            || (shortcuts_match(
+                                &cfg.screenshot_fullscreen_edit_shortcut,
+                                "Ctrl+Shift+9",
+                            ) && shortcuts_match(&combo, "Cmd+Shift+9"));
+                    if cfg.screenshot_fullscreen_edit_enabled && edit_match {
                         notify_overlay(UiOverlayEvent::TriggerFullscreenEditScreenshot);
                         return std::ptr::null_mut();
                     }
-                    if cfg.screenshot_fullscreen_copy_enabled
-                        && shortcuts_match(&combo, &cfg.screenshot_fullscreen_copy_shortcut)
-                    {
+                    let copy_match =
+                        shortcuts_match(&combo, &cfg.screenshot_fullscreen_copy_shortcut)
+                            || (shortcuts_match(
+                                &cfg.screenshot_fullscreen_copy_shortcut,
+                                "Cmd+Shift+8",
+                            ) && shortcuts_match(&combo, "Ctrl+Shift+8"))
+                            || (shortcuts_match(
+                                &cfg.screenshot_fullscreen_copy_shortcut,
+                                "Ctrl+Shift+8",
+                            ) && shortcuts_match(&combo, "Cmd+Shift+8"));
+                    if cfg.screenshot_fullscreen_copy_enabled && copy_match {
                         notify_overlay(UiOverlayEvent::TriggerFullscreenCopyScreenshot);
                         return std::ptr::null_mut();
                     }

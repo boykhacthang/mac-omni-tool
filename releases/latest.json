@@ -3,7 +3,7 @@
   "published_at": "2026-11-11",
   "zip_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.3.1/MacOmniTool-v2.3.1-macOS.zip",
   "dmg_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.3.1/MacOmniTool-v2.3.1-Installer.dmg",
-  "sha256_zip": "0cfa371da825b2d8f37e4d6516f6baff53b1b20931dd5495146ac5dfa337c2e0",
-  "notes_en": "B\u1ea3n ph\u00e1t h\u00e0nh v2.3.1: Kh\u1eafc ph\u1ee5c tri\u1ec7t \u0111\u1ec3 l\u1ed7i crash SIGABRT (NSInvalidArgumentException tr\u00ean CALayer khi \u0111\u00f3ng/m\u1edf l\u1ea1i c\u1eeda s\u1ed5 & ch\u1ee5p m\u00e0n h\u00ecnh) v\u00e0 t\u1ed1i \u01b0u h\u00f3a b\u1ed9 nh\u1edb Metal GPU / IOSurface gi\u00fap gi\u1ea3m RAM t\u1eeb ~230 MB xu\u1ed1ng ~50\u201355 MB.",
-  "notes_vi": "B\u1ea3n ph\u00e1t h\u00e0nh v2.3.1: Kh\u1eafc ph\u1ee5c tri\u1ec7t \u0111\u1ec3 l\u1ed7i crash SIGABRT (NSInvalidArgumentException tr\u00ean CALayer khi \u0111\u00f3ng/m\u1edf l\u1ea1i c\u1eeda s\u1ed5 & ch\u1ee5p m\u00e0n h\u00ecnh) v\u00e0 t\u1ed1i \u01b0u h\u00f3a b\u1ed9 nh\u1edb Metal GPU / IOSurface gi\u00fap gi\u1ea3m RAM t\u1eeb ~230 MB xu\u1ed1ng ~50\u201355 MB."
+  "sha256_zip": "f0acba67726e7d07efdbd6e4f7d599deee178245639e564ed2ae2460f96bfbba",
+  "notes_en": "v2.3.1: T\u1ed1i \u01b0u RAM (~50 MB) & s\u1eeda l\u1ed7i ph\u00edm t\u1eaft ch\u1ee5p m\u00e0n h\u00ecnh (Ctrl+Shift+0 / Cmd+Shift+0) khi \u1ea9n/\u0111\u00f3ng app ch\u1ea1y ng\u1ea7m",
+  "notes_vi": "v2.3.1: T\u1ed1i \u01b0u RAM (~50 MB) & s\u1eeda l\u1ed7i ph\u00edm t\u1eaft ch\u1ee5p m\u00e0n h\u00ecnh (Ctrl+Shift+0 / Cmd+Shift+0) khi \u1ea9n/\u0111\u00f3ng app ch\u1ea1y ng\u1ea7m"
 }

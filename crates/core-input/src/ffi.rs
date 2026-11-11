@@ -133,6 +133,7 @@ pub const CARBON_CONTROL_KEY: u32 = 1 << 12;
 #[link(name = "Carbon", kind = "framework")]
 extern "C" {
     pub fn GetApplicationEventTarget() -> *mut c_void;
+    pub fn GetEventDispatcherTarget() -> *mut c_void;
     pub fn InstallEventHandler(
         in_target: *mut c_void,
         in_handler: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> i32,

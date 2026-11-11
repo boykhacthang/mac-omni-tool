@@ -485,9 +485,6 @@ impl WindowGpuSurface {
     where
         F: FnMut(&egui::Context),
     {
-        if !self.window.is_visible().unwrap_or(false) {
-            return std::time::Duration::MAX;
-        }
         self.ensure_surface(gpu);
         let cur_light = is_light_theme();
         if self.last_theme_light != Some(cur_light) {

@@ -1,7 +1,8 @@
 use crate::events::AppUserEvent;
 use crate::macos_window::{
     class_addMethod, objc_allocateClassPair, objc_autoreleasePoolPop, objc_autoreleasePoolPush,
-    objc_getClass, objc_msgSend, objc_registerClassPair, sel_registerName, set_macos_dock_icon,
+    objc_getClass, objc_msgSend, objc_registerClassPair, object_getClass, sel_registerName,
+    set_macos_dock_icon,
 };
 use std::ffi::{c_char, c_void, CString};
 use std::sync::atomic::{AtomicIsize, Ordering};
@@ -78,6 +79,48 @@ unsafe extern "C" fn quit_menu_clicked(
             }
         }
     }
+}
+
+/// Handle `applicationShouldHandleReopen:hasVisibleWindows:` on `NSApplicationDelegate` so
+/// clicking `/Applications/MacOmniTool.app` in Finder / Spotlight / Dock while hidden in
+/// background (`NSApplicationActivationPolicyAccessory`) immediately reopens the Main Dashboard.
+unsafe extern "C" fn app_should_handle_reopen(
+    _this: *mut c_void,
+    _cmd: *mut c_void,
+    _sender: *mut c_void,
+    _has_visible_windows: bool,
+) -> bool {
+    if let Some(lock) = MENUBAR_EVENT_PROXY.get() {
+        if let Ok(guard) = lock.lock() {
+            if let Some(proxy) = guard.as_ref() {
+                let _ = proxy.send_event(AppUserEvent::ShowLauncher);
+            }
+        }
+    }
+    true
+}
+
+/// Handle `applicationShouldTerminate:` on `NSApplicationDelegate`.
+/// When `keep_running_in_background` is enabled ("Chạy ngầm khi đóng cửa sổ"), pressing `Cmd+Q`
+/// or choosing "Quit" from the Dock icon hides the main window & Dock icon into background mode
+/// (`NSTerminateCancel = 0`) so global hotkeys (`Ctrl+Shift+0` / `Cmd+Shift+0`) continue working!
+/// Clicking "Thoát hẳn" in the Menu Bar popover calls `event_loop.exit()` directly to exit.
+unsafe extern "C" fn app_should_terminate(
+    _this: *mut c_void,
+    _cmd: *mut c_void,
+    _sender: *mut c_void,
+) -> usize {
+    if core_input::get_input_config().keep_running_in_background {
+        if let Some(lock) = MENUBAR_EVENT_PROXY.get() {
+            if let Ok(guard) = lock.lock() {
+                if let Some(proxy) = guard.as_ref() {
+                    let _ = proxy.send_event(AppUserEvent::HideLauncher);
+                    return 0; // NSTerminateCancel
+                }
+            }
+        }
+    }
+    1 // NSTerminateNow
 }
 
 unsafe fn make_nsstring(s: &str) -> *mut c_void {
@@ -208,6 +251,41 @@ pub unsafe fn setup_macos_application_menu() {
     if !ns_app_cls.is_null() && !ns_menu_cls.is_null() && !ns_item_cls.is_null() {
         let ns_app = msg0(ns_app_cls, sel_registerName(c"sharedApplication".as_ptr()));
         if !ns_app.is_null() {
+            // Attach `applicationShouldHandleReopen:hasVisibleWindows:` and `applicationShouldTerminate:` onto WinitApplicationDelegate
+            let delegate = msg0(ns_app, sel_registerName(c"delegate".as_ptr()));
+            if !delegate.is_null() {
+                let delegate_cls = object_getClass(delegate);
+                if !delegate_cls.is_null() {
+                    let sel_reopen = sel_registerName(
+                        c"applicationShouldHandleReopen:hasVisibleWindows:".as_ptr(),
+                    );
+                    let reopen_imp: unsafe extern "C" fn(
+                        *mut c_void,
+                        *mut c_void,
+                        *mut c_void,
+                    ) = std::mem::transmute(app_should_handle_reopen as *const c_void);
+                    let _ = class_addMethod(
+                        delegate_cls,
+                        sel_reopen,
+                        reopen_imp,
+                        c"B@:@B".as_ptr(),
+                    );
+
+                    let sel_term = sel_registerName(c"applicationShouldTerminate:".as_ptr());
+                    let term_imp: unsafe extern "C" fn(
+                        *mut c_void,
+                        *mut c_void,
+                        *mut c_void,
+                    ) = std::mem::transmute(app_should_terminate as *const c_void);
+                    let _ = class_addMethod(
+                        delegate_cls,
+                        sel_term,
+                        term_imp,
+                        c"L@:@".as_ptr(),
+                    );
+                }
+            }
+
             let mut main_menu = msg0(ns_app, sel_registerName(c"mainMenu".as_ptr()));
             if main_menu.is_null() {
                 let m_alloc = msg0(ns_menu_cls, sel_registerName(c"alloc".as_ptr()));

@@ -649,13 +649,30 @@ pub unsafe fn show_floating_overlay_window(window: &Window, corner_radius: f64) 
     let pool = objc_autoreleasePoolPush();
     let ns_win = get_ns_window(window);
     if !ns_win.is_null() {
+        type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
         type Msg1Bool = unsafe extern "C" fn(*mut c_void, *mut c_void, bool);
         type Msg1Isize = unsafe extern "C" fn(*mut c_void, *mut c_void, isize);
         type Msg1F64 = unsafe extern "C" fn(*mut c_void, *mut c_void, f64);
+        type Msg1Ptr = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
 
+        let msg0: Msg0 = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_bool: Msg1Bool = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_isize: Msg1Isize = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_f64: Msg1F64 = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_ptr: Msg1Ptr = std::mem::transmute(objc_msgSend as *const c_void);
+
+        let ns_app_cls = objc_getClass(c"NSApplication".as_ptr());
+        if !ns_app_cls.is_null() {
+            let ns_app = msg0(ns_app_cls, sel_registerName(c"sharedApplication".as_ptr()));
+            if !ns_app.is_null() {
+                let _ = msg0(ns_app, sel_registerName(c"unhideWithoutActivation".as_ptr()));
+                msg1_bool(
+                    ns_app,
+                    sel_registerName(c"activateIgnoringOtherApps:".as_ptr()),
+                    true,
+                );
+            }
+        }
 
         promote_to_nonactivating_overlay_panel(ns_win);
         msg1_bool(
@@ -679,6 +696,12 @@ pub unsafe fn show_floating_overlay_window(window: &Window, corner_radius: f64) 
             false,
         );
         msg1_f64(ns_win, sel_registerName(c"setAlphaValue:".as_ptr()), 1.0);
+        let _ = msg0(ns_win, sel_registerName(c"orderFrontRegardless".as_ptr()));
+        msg1_ptr(
+            ns_win,
+            sel_registerName(c"makeKeyAndOrderFront:".as_ptr()),
+            std::ptr::null_mut(),
+        );
     }
     objc_autoreleasePoolPop(pool);
     window.set_visible(true);
@@ -876,6 +899,21 @@ pub unsafe fn reveal_screenshot_window(window: &Window, make_key: bool) {
 
     let ns_win = get_ns_window(window);
     if !ns_win.is_null() {
+        let ns_app_cls = objc_getClass(c"NSApplication".as_ptr());
+        if !ns_app_cls.is_null() {
+            let ns_app = msg0(ns_app_cls, sel_registerName(c"sharedApplication".as_ptr()));
+            if !ns_app.is_null() {
+                let _ = msg0(ns_app, sel_registerName(c"unhideWithoutActivation".as_ptr()));
+                if make_key {
+                    msg1_bool(
+                        ns_app,
+                        sel_registerName(c"activateIgnoringOtherApps:".as_ptr()),
+                        true,
+                    );
+                }
+            }
+        }
+
         promote_to_nonactivating_overlay_panel(ns_win);
         msg1_bool(
             ns_win,
@@ -911,17 +949,6 @@ pub unsafe fn reveal_screenshot_window(window: &Window, make_key: bool) {
         let _ = msg0(ns_win, sel_registerName(c"orderFrontRegardless".as_ptr()));
 
         if make_key {
-            let ns_app_cls = objc_getClass(c"NSApplication".as_ptr());
-            if !ns_app_cls.is_null() {
-                let ns_app = msg0(ns_app_cls, sel_registerName(c"sharedApplication".as_ptr()));
-                if !ns_app.is_null() {
-                    msg1_bool(
-                        ns_app,
-                        sel_registerName(c"activateIgnoringOtherApps:".as_ptr()),
-                        true,
-                    );
-                }
-            }
             msg1_ptr(
                 ns_win,
                 sel_registerName(c"makeKeyAndOrderFront:".as_ptr()),

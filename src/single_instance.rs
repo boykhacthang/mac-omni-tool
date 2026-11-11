@@ -49,8 +49,8 @@ pub fn ensure_single_instance(start_minimized: bool) {
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(0);
 
-        // If launched in background (--minimized) or within 20s of the existing instance (boot/login race), exit immediately!
-        if start_minimized || now_secs.saturating_sub(existing_ts) < 20 {
+        // If launched in background (--minimized) or within 2s of the existing instance (boot/login race), exit immediately!
+        if start_minimized || now_secs.saturating_sub(existing_ts) < 2 {
             std::process::exit(0);
         }
 

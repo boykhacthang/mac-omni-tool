@@ -5,7 +5,7 @@ use crate::actions::{
     notify_overlay, notify_overlay_immediate, now_ms, trigger_system_action,
 };
 use crate::config::{
-    get_input_config, shortcut_to_carbon_keycode_and_modifiers, UiOverlayEvent,
+    get_input_config, shortcut_to_carbon_keycode_and_modifiers, shortcuts_match, UiOverlayEvent,
 };
 use crate::ffi::*;
 use std::ffi::c_void;
@@ -14,9 +14,20 @@ use std::sync::{Mutex, OnceLock};
 
 pub(crate) static OVERLAY_ESCAPE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static ESCAPE_HOTKEY_REF: AtomicI64 = AtomicI64::new(0);
+static CARBON_DISP_HANDLER_REF: AtomicI64 = AtomicI64::new(0);
+static CARBON_APP_HANDLER_REF: AtomicI64 = AtomicI64::new(0);
 static LAST_WINDOW_SNAP_MS: AtomicI64 = AtomicI64::new(0);
 static WINDOW_TILING_HOTKEY_REFS: OnceLock<Mutex<Vec<(usize, String)>>> = OnceLock::new();
 static FEATURE_HOTKEY_REFS: OnceLock<Mutex<Vec<usize>>> = OnceLock::new();
+
+unsafe fn primary_carbon_target() -> *mut c_void {
+    let disp = GetEventDispatcherTarget();
+    if !disp.is_null() {
+        disp
+    } else {
+        GetApplicationEventTarget()
+    }
+}
 
 fn window_tiling_refs() -> &'static Mutex<Vec<(usize, String)>> {
     WINDOW_TILING_HOTKEY_REFS.get_or_init(|| Mutex::new(Vec::new()))
@@ -31,7 +42,7 @@ fn feature_hotkey_refs() -> &'static Mutex<Vec<usize>> {
 /// Immediately unregisters (`UnregisterEventHotKey`) any hotkey whose feature toggle is OFF.
 pub fn sync_feature_carbon_hotkeys() {
     unsafe {
-        let target = GetApplicationEventTarget();
+        let target = primary_carbon_target();
         if target.is_null() {
             return;
         }
@@ -75,28 +86,33 @@ pub fn sync_feature_carbon_hotkeys() {
             &cfg.mission_control_shortcut,
         );
 
-        let screen_rec_ok = core_window::is_screen_recording_granted();
+        // Hotkey 4 & 14: Screenshot Mode 1 (Region) — always registered when feature is enabled;
+        // supports both Cmd+Shift+0 and Ctrl+Shift+0 when default shortcut is active.
+        let region_active = cfg.screenshot_enabled && cfg.screenshot_region_enabled;
+        register_if_active(4, region_active, &cfg.screenshot_shortcut);
+        if shortcuts_match(&cfg.screenshot_shortcut, "Cmd+Shift+0") {
+            register_if_active(14, region_active, "Ctrl+Shift+0");
+        } else if shortcuts_match(&cfg.screenshot_shortcut, "Ctrl+Shift+0") {
+            register_if_active(14, region_active, "Cmd+Shift+0");
+        }
 
-        // Hotkey 4: Screenshot Mode 1 (Region) — only active when Screen Recording permission is granted
-        register_if_active(
-            4,
-            screen_rec_ok && cfg.screenshot_enabled && cfg.screenshot_region_enabled,
-            &cfg.screenshot_shortcut,
-        );
+        // Hotkey 5 & 15: Screenshot Mode 2 (Fullscreen + Annotation)
+        let fs_edit_active = cfg.screenshot_enabled && cfg.screenshot_fullscreen_edit_enabled;
+        register_if_active(5, fs_edit_active, &cfg.screenshot_fullscreen_edit_shortcut);
+        if shortcuts_match(&cfg.screenshot_fullscreen_edit_shortcut, "Cmd+Shift+9") {
+            register_if_active(15, fs_edit_active, "Ctrl+Shift+9");
+        } else if shortcuts_match(&cfg.screenshot_fullscreen_edit_shortcut, "Ctrl+Shift+9") {
+            register_if_active(15, fs_edit_active, "Cmd+Shift+9");
+        }
 
-        // Hotkey 5: Screenshot Mode 2 (Fullscreen + Annotation) — only active when Screen Recording permission is granted
-        register_if_active(
-            5,
-            screen_rec_ok && cfg.screenshot_enabled && cfg.screenshot_fullscreen_edit_enabled,
-            &cfg.screenshot_fullscreen_edit_shortcut,
-        );
-
-        // Hotkey 6: Screenshot Mode 3 (Fullscreen + Instant Copy) — only active when Screen Recording permission is granted
-        register_if_active(
-            6,
-            screen_rec_ok && cfg.screenshot_enabled && cfg.screenshot_fullscreen_copy_enabled,
-            &cfg.screenshot_fullscreen_copy_shortcut,
-        );
+        // Hotkey 6 & 16: Screenshot Mode 3 (Fullscreen + Instant Copy)
+        let fs_copy_active = cfg.screenshot_enabled && cfg.screenshot_fullscreen_copy_enabled;
+        register_if_active(6, fs_copy_active, &cfg.screenshot_fullscreen_copy_shortcut);
+        if shortcuts_match(&cfg.screenshot_fullscreen_copy_shortcut, "Cmd+Shift+8") {
+            register_if_active(16, fs_copy_active, "Ctrl+Shift+8");
+        } else if shortcuts_match(&cfg.screenshot_fullscreen_copy_shortcut, "Ctrl+Shift+8") {
+            register_if_active(16, fs_copy_active, "Cmd+Shift+8");
+        }
 
         // Hotkey 7: Show Desktop (F11)
         register_if_active(
@@ -143,7 +159,7 @@ pub fn trigger_window_snap_debounced(action: &str) {
 pub fn sync_window_tiling_carbon_hotkeys() {
     sync_feature_carbon_hotkeys();
     unsafe {
-        let target = GetApplicationEventTarget();
+        let target = primary_carbon_target();
         if target.is_null() {
             return;
         }
@@ -193,7 +209,7 @@ pub fn set_overlay_escape_hotkey_active(active: bool) {
     unsafe {
         if active {
             if ESCAPE_HOTKEY_REF.load(Ordering::SeqCst) == 0 {
-                let target = GetApplicationEventTarget();
+                let target = primary_carbon_target();
                 if !target.is_null() {
                     let mut hk_esc: *mut c_void = std::ptr::null_mut();
                     let status = RegisterEventHotKey(
@@ -256,27 +272,24 @@ unsafe extern "C" fn carbon_hotkey_handler(
                     trigger_system_action("mission_control");
                 }
             }
-            4 => {
-                if core_window::is_screen_recording_granted()
-                    && cfg.screenshot_enabled
+            4 | 14 => {
+                if cfg.screenshot_enabled
                     && cfg.screenshot_region_enabled
                     && !cfg.screenshot_shortcut.trim().is_empty()
                 {
                     notify_overlay(UiOverlayEvent::TriggerScreenshotOverlay);
                 }
             }
-            5 => {
-                if core_window::is_screen_recording_granted()
-                    && cfg.screenshot_enabled
+            5 | 15 => {
+                if cfg.screenshot_enabled
                     && cfg.screenshot_fullscreen_edit_enabled
                     && !cfg.screenshot_fullscreen_edit_shortcut.trim().is_empty()
                 {
                     notify_overlay(UiOverlayEvent::TriggerFullscreenEditScreenshot);
                 }
             }
-            6 => {
-                if core_window::is_screen_recording_granted()
-                    && cfg.screenshot_enabled
+            6 | 16 => {
+                if cfg.screenshot_enabled
                     && cfg.screenshot_fullscreen_copy_enabled
                     && !cfg.screenshot_fullscreen_copy_shortcut.trim().is_empty()
                 {
@@ -314,26 +327,46 @@ unsafe extern "C" fn carbon_hotkey_handler(
     0
 }
 
-/// Register native Carbon EventHotKeys on main thread (`Cmd+Shift+V`, `F3`, `Cmd+Shift+0/9/8`, and Window Tiling shortcuts).
+/// Register native Carbon EventHotKeys on main thread (`Cmd+Shift+V`, `F3`, `Cmd+Shift+0/9/8`, `Ctrl+Shift+0/9/8`, and Window Tiling shortcuts).
 pub fn register_native_carbon_hotkeys() {
     unsafe {
-        let target = GetApplicationEventTarget();
-        if target.is_null() {
-            return;
-        }
         let spec = EventTypeSpec {
             event_class: K_EVENT_CLASS_KEYBOARD,
             event_kind: K_EVENT_HOT_KEY_PRESSED,
         };
-        let mut handler_ref: *mut c_void = std::ptr::null_mut();
-        InstallEventHandler(
-            target,
-            carbon_hotkey_handler,
-            1,
-            &spec,
-            std::ptr::null_mut(),
-            &mut handler_ref,
-        );
+        let disp_target = GetEventDispatcherTarget();
+        if !disp_target.is_null() && CARBON_DISP_HANDLER_REF.load(Ordering::SeqCst) == 0 {
+            let mut handler_ref: *mut c_void = std::ptr::null_mut();
+            let status = InstallEventHandler(
+                disp_target,
+                carbon_hotkey_handler,
+                1,
+                &spec,
+                std::ptr::null_mut(),
+                &mut handler_ref,
+            );
+            if status == 0 && !handler_ref.is_null() {
+                CARBON_DISP_HANDLER_REF.store(handler_ref as i64, Ordering::SeqCst);
+            }
+        }
+        let app_target = GetApplicationEventTarget();
+        if !app_target.is_null()
+            && app_target != disp_target
+            && CARBON_APP_HANDLER_REF.load(Ordering::SeqCst) == 0
+        {
+            let mut handler_ref: *mut c_void = std::ptr::null_mut();
+            let status = InstallEventHandler(
+                app_target,
+                carbon_hotkey_handler,
+                1,
+                &spec,
+                std::ptr::null_mut(),
+                &mut handler_ref,
+            );
+            if status == 0 && !handler_ref.is_null() {
+                CARBON_APP_HANDLER_REF.store(handler_ref as i64, Ordering::SeqCst);
+            }
+        }
     }
 
     sync_window_tiling_carbon_hotkeys();
