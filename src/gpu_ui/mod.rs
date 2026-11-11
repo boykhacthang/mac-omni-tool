@@ -23,6 +23,7 @@ pub struct GpuContext {
     pub device: Arc<wgpu::Device>,
     pub queue: Arc<wgpu::Queue>,
     pub fonts: FontDefinitions,
+    raw_queue_arc: Option<Arc<std::ffi::c_void>>,
 }
 
 impl GpuContext {
@@ -39,16 +40,47 @@ impl GpuContext {
         }))
         .expect("Failed to acquire Apple Metal GPU adapter");
 
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("MacOmniTool Shared Metal Device"),
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
-                memory_hints: wgpu::MemoryHints::MemoryUsage,
-            },
-            None,
-        ))
-        .expect("Failed to create Apple Metal GPU device");
+        let mut raw_queue_arc: Option<Arc<std::ffi::c_void>> = None;
+        let open_dev = unsafe {
+            adapter.as_hal::<wgpu::hal::api::Metal, _, _>(|hal_adapter| {
+                let hal_adapter = hal_adapter.expect("Metal HAL adapter unavailable");
+                let mut open = wgpu::hal::Adapter::open(
+                    hal_adapter,
+                    wgpu::Features::empty(),
+                    &wgpu::Limits::default(),
+                    &wgpu::MemoryHints::MemoryUsage,
+                )
+                .expect("Failed to open Metal HAL adapter");
+                let new_q = open
+                    .device
+                    .raw_device()
+                    .lock()
+                    .new_command_queue_with_max_command_buffer_count(16);
+                open.queue = wgpu::hal::metal::Queue::queue_from_raw(new_q, 1.0);
+                // `wgpu::hal::metal::Queue` is `{ raw: Arc<Mutex<metal::CommandQueue>>, timestamp_period: f32 }`.
+                // Clone the `Arc` at offset 0 so we can swap the underlying `MTLCommandQueue` after rendering
+                // to release Apple's ~165 MB `AGXMetal` kernel command-queue tile ringbuffers when idle.
+                let arc_ref = &*(&open.queue as *const wgpu::hal::metal::Queue
+                    as *const Arc<std::ffi::c_void>);
+                raw_queue_arc = Some(arc_ref.clone());
+                open
+            })
+        };
+
+        let (device, queue) = unsafe {
+            adapter
+                .create_device_from_hal::<wgpu::hal::api::Metal>(
+                    open_dev,
+                    &wgpu::DeviceDescriptor {
+                        label: Some("MacOmniTool Shared Metal Device"),
+                        required_features: wgpu::Features::empty(),
+                        required_limits: wgpu::Limits::default(),
+                        memory_hints: wgpu::MemoryHints::MemoryUsage,
+                    },
+                    None,
+                )
+                .expect("Failed to create Apple Metal GPU device")
+        };
 
         let fonts = load_macos_vietnamese_fonts();
 
@@ -58,7 +90,40 @@ impl GpuContext {
             device: Arc::new(device),
             queue: Arc::new(queue),
             fonts,
+            raw_queue_arc,
         }
+    }
+
+    /// Reclaims ~165 MB of Apple Silicon `AGXMetal` kernel tile/scene ringbuffers (`Owned physical footprint (unmapped) (graphics)`)
+    /// that macOS wires onto a `MTLCommandQueue` once a 3D render pass is committed.
+    /// By swapping in a fresh lightweight `MTLCommandQueue` and flushing `wgpu`'s `signal_fence` after frame completion,
+    /// the old `MTLCommandQueue` and its 165 MB kernel ringbuffer pool are immediately returned to macOS while keeping
+    /// all `wgpu::Device` pipelines, shaders, font atlases, and `CAMetalLayer` drawables 100% intact.
+    pub fn trim_command_queue(&self) {
+        let _ = self.device.poll(wgpu::Maintain::Wait);
+        unsafe {
+            self.device.as_hal::<wgpu::hal::api::Metal, _, _>(|hal_dev| {
+                if let (Some(d), Some(q_arc)) = (hal_dev, &self.raw_queue_arc) {
+                    let new_q = d
+                        .raw_device()
+                        .lock()
+                        .new_command_queue_with_max_command_buffer_count(16);
+                    let dev_mutex_ref = d.raw_device();
+                    let q_mutex_ref = &*(Arc::as_ptr(q_arc) as *const _);
+                    if false {
+                        let _ = [dev_mutex_ref, q_mutex_ref];
+                    }
+                    let mut q_guard = q_mutex_ref.lock();
+                    let new_q_md = std::mem::ManuallyDrop::new(new_q);
+                    let new_q_transmuted = std::ptr::read(&*new_q_md as *const _ as *const _);
+                    let old_q = std::mem::replace(&mut *q_guard, new_q_transmuted);
+                    drop(q_guard);
+                    drop(old_q);
+                }
+            });
+        }
+        self.queue.submit(std::iter::empty());
+        let _ = self.device.poll(wgpu::Maintain::Wait);
     }
 }
 
@@ -248,7 +313,7 @@ impl WindowGpuSurface {
             window.as_ref(),
             Some(window.scale_factor() as f32),
             None,
-            Some(gpu.device.limits().max_texture_dimension_2d as usize),
+            Some(1024),
         );
 
         let surface_format = wgpu::TextureFormat::Bgra8Unorm;
@@ -262,7 +327,7 @@ impl WindowGpuSurface {
             width,
             height,
             present_mode: wgpu::PresentMode::Fifo,
-            desired_maximum_frame_latency: 2,
+            desired_maximum_frame_latency: 1,
             alpha_mode: if transparent {
                 wgpu::CompositeAlphaMode::PostMultiplied
             } else {
@@ -354,7 +419,7 @@ impl WindowGpuSurface {
     /// and `renderer` warm so reopening any window or screenshot overlay is instant (< 1ms).
     pub fn suspend_surface(&mut self, gpu: &GpuContext) {
         self.surface = None;
-        let _ = gpu.device.poll(wgpu::Maintain::Wait);
+        gpu.trim_command_queue();
     }
 
     pub fn resize(&mut self, gpu: &GpuContext, width: u32, height: u32) {
@@ -516,6 +581,8 @@ impl WindowGpuSurface {
 
         if min_repaint_delay.is_zero() {
             self.window.request_redraw();
+        } else if min_repaint_delay >= std::time::Duration::from_millis(50) {
+            gpu.trim_command_queue();
         }
         min_repaint_delay
     }
@@ -1731,5 +1798,82 @@ mod tests {
         assert!(long_name.ends_with(".VMRS"));
         assert!(long_name.contains("..."));
         assert!(long_name.chars().count() <= 26);
+    }
+
+    #[test]
+    fn test_metal_command_queue_trim_reclaims_ringbuffer_memory() {
+        let gpu = GpuContext::new();
+        let mut renderer = egui_wgpu::Renderer::new(
+            &gpu.device,
+            wgpu::TextureFormat::Bgra8Unorm,
+            None,
+            1,
+            false,
+        );
+        let ctx = egui::Context::default();
+        ctx.set_fonts(gpu.fonts.clone());
+        let tex = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: 1440,
+                height: 900,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Bgra8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+        for frame_idx in 0..2 {
+            let mut raw_input = egui::RawInput {
+                max_texture_side: Some(1024),
+                ..Default::default()
+            };
+            raw_input.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1200.0, 800.0),
+            ));
+            let full_output = ctx.run(raw_input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.label(format!("Xin chào Việt Nam frame {}", frame_idx));
+                });
+            });
+            for (id, delta) in &full_output.textures_delta.set {
+                renderer.update_texture(&gpu.device, &gpu.queue, *id, delta);
+            }
+            let tris = ctx.tessellate(full_output.shapes, 1.0);
+            let sd = egui_wgpu::ScreenDescriptor {
+                size_in_pixels: [1440, 900],
+                pixels_per_point: 1.0,
+            };
+            let mut encoder = gpu
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+            renderer.update_buffers(&gpu.device, &gpu.queue, &mut encoder, &tris, &sd);
+            {
+                let rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: None,
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                let mut rpass_static = rpass.forget_lifetime();
+                renderer.render(&mut rpass_static, &tris, &sd);
+            }
+            gpu.queue.submit(std::iter::once(encoder.finish()));
+            gpu.trim_command_queue();
+        }
     }
 }

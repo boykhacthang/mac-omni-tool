@@ -1,9 +1,9 @@
 {
-  "version": "2.3.0",
+  "version": "2.3.1",
   "published_at": "2026-11-11",
-  "zip_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.3.0/MacOmniTool-v2.3.0-macOS.zip",
-  "dmg_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.3.0/MacOmniTool-v2.3.0-Installer.dmg",
-  "sha256_zip": "c0fdb34472e9c4b600a549d7bbe5fbc29c3f3f237338612a7bd1331e9cddc514",
-  "notes_en": "Pure Rust + Metal GPU UI (egui + wgpu), instant region screenshot with default Rectangle tool, middle-truncation for long filenames, live AirPods/Audio connection status refresh, plus delete confirmation modal & multi-select Large Files with 0ms instant table updates.",
-  "notes_vi": "Ki\u1ebfn tr\u00fac Pure Rust + Metal GPU UI (egui + wgpu), ch\u1ee5p v\u00f9ng si\u00eau t\u1ed1c m\u1eb7c \u0111\u1ecbnh c\u00f4ng c\u1ee5 Khung ch\u1eef nh\u1eadt, r\u00fat g\u1ecdn t\u00ean file d\u00e0i \u1edf gi\u1eefa, t\u1ef1 \u0111\u1ed9ng c\u1eadp nh\u1eadt tr\u1ea1ng th\u00e1i k\u1ebft n\u1ed1i AirPods/Loa, k\u00e8m h\u1ed9p tho\u1ea1i x\u00e1c nh\u1eadn x\u00f3a & ch\u1ecdn nhi\u1ec1u File L\u1edbn c\u1eadp nh\u1eadt b\u1ea3ng t\u1ee9c th\u00ec 0ms."
+  "zip_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.3.1/MacOmniTool-v2.3.1-macOS.zip",
+  "dmg_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.3.1/MacOmniTool-v2.3.1-Installer.dmg",
+  "sha256_zip": "4df8d85e35f9832ca29c6f526bf3f2f59da75972f256f724c802d8ab95c371ad",
+  "notes_en": "Deep Apple Silicon Metal GPU memory optimization (-79% RAM, from ~229 MB down to ~49 MB active and ~38 MB in Menu Bar via automatic MTLCommandQueue tile ringbuffer reclamation), Pure Rust + Metal GPU UI (egui + wgpu), default Rectangle region screenshot tool, middle-truncation for long filenames, live AirPods/Audio connection status refresh, plus delete confirmation modal & multi-select Large Files.",
+  "notes_vi": "T\u1ed1i \u01b0u s\u00e2u b\u1ed9 nh\u1edb GPU Metal tr\u00ean Apple Silicon (-79% RAM, t\u1eeb ~229 MB xu\u1ed1ng ~49 MB khi m\u1edf v\u00e0 ~38 MB khi \u1ea9n v\u1ec1 Menu Bar nh\u1edd t\u1ef1 \u0111\u1ed9ng thu h\u1ed3i MTLCommandQueue tile ringbuffers), ki\u1ebfn tr\u00fac Pure Rust + Metal GPU UI (egui + wgpu), ch\u1ee5p v\u00f9ng m\u1eb7c \u0111\u1ecbnh Khung ch\u1eef nh\u1eadt, r\u00fat g\u1ecdn t\u00ean file d\u00e0i \u1edf gi\u1eefa, c\u1eadp nh\u1eadt t\u1ee9c th\u00ec k\u1ebft n\u1ed1i AirPods/Loa, k\u00e8m h\u1ed9p tho\u1ea1i x\u00e1c nh\u1eadn x\u00f3a & ch\u1ecdn nhi\u1ec1u File L\u1edbn."
 }

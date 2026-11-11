@@ -534,10 +534,10 @@ async function renderUnifiedSettingsScreen(view) {
         <div class="card-header" style="flex-wrap:wrap;gap:10px;margin-bottom:8px;">
           <div class="card-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <span>💡 ${t("settings.about_community_title")}</span>
-            <span class="badge-ok">v2.3.0 • MIT License</span>
+            <span class="badge-ok">v2.3.1 • MIT License</span>
             ${cfg.auto_check_updates === false ? `
               <span class="badge-ok" style="font-size:11px;">
-                ${escapeHtml(t("update.keep_current_mode_badge", { version: "2.3.0" }))}
+                ${escapeHtml(t("update.keep_current_mode_badge", { version: "2.3.1" }))}
               </span>
             ` : ""}
           </div>
