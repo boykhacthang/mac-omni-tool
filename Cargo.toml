@@ -19,7 +19,7 @@ rayon = "1.10"
 
 [package]
 name = "mac-omni-tool"
-version = "2.2.1"
+version = "2.3.0"
 edition = "2021"
 authors = ["boykhacthang"]
 license = "MIT"
@@ -30,8 +30,12 @@ description = "All-in-One Native macOS Utility (Free Community Edition) built in
 serde.workspace = true
 serde_json.workspace = true
 libc.workspace = true
-tao = "0.30"
-wry = "0.47"
+egui = "0.29"
+egui-winit = "0.29"
+egui-wgpu = "0.29"
+wgpu = { version = "22", default-features = false, features = ["metal", "wgsl"] }
+pollster = "0.3"
+raw-window-handle = "0.6"
 core-display = { path = "crates/core-display" }
 core-monitor = { path = "crates/core-monitor" }
 core-clipboard = { path = "crates/core-clipboard" }

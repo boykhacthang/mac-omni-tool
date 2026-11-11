@@ -106,29 +106,53 @@ unsafe fn get_audio_device_transport(dev_id: u32) -> u32 {
 
 unsafe fn device_is_alive(dev_id: u32) -> bool {
     const K_AUDIO_DEVICE_PROPERTY_DEVICE_IS_ALIVE: u32 = 0x6C69_766E; // 'livn'
-    let addr = AudioObjectPropertyAddress {
+    const K_AUDIO_DEVICE_PROPERTY_IS_HIDDEN: u32 = 0x6869_646E; // 'hidn'
+
+    let alive_addr = AudioObjectPropertyAddress {
         m_selector: K_AUDIO_DEVICE_PROPERTY_DEVICE_IS_ALIVE,
         m_scope: K_AUDIO_OBJECT_PROPERTY_SCOPE_GLOBAL,
         m_element: K_AUDIO_OBJECT_PROPERTY_ELEMENT_MAIN,
     };
-    if AudioObjectHasProperty(dev_id, &addr) == 0 {
-        return true;
+    if AudioObjectHasProperty(dev_id, &alive_addr) != 0 {
+        let mut alive: u32 = 1;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        if AudioObjectGetPropertyData(
+            dev_id,
+            &alive_addr,
+            0,
+            std::ptr::null(),
+            &mut size,
+            &mut alive as *mut u32 as *mut std::ffi::c_void,
+        ) == 0
+            && alive == 0
+        {
+            return false;
+        }
     }
-    let mut alive: u32 = 1;
-    let mut size = std::mem::size_of::<u32>() as u32;
-    if AudioObjectGetPropertyData(
-        dev_id,
-        &addr,
-        0,
-        std::ptr::null(),
-        &mut size,
-        &mut alive as *mut u32 as *mut std::ffi::c_void,
-    ) == 0
-    {
-        alive != 0
-    } else {
-        true
+
+    let hidden_addr = AudioObjectPropertyAddress {
+        m_selector: K_AUDIO_DEVICE_PROPERTY_IS_HIDDEN,
+        m_scope: K_AUDIO_OBJECT_PROPERTY_SCOPE_GLOBAL,
+        m_element: K_AUDIO_OBJECT_PROPERTY_ELEMENT_MAIN,
+    };
+    if AudioObjectHasProperty(dev_id, &hidden_addr) != 0 {
+        let mut hidden: u32 = 0;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        if AudioObjectGetPropertyData(
+            dev_id,
+            &hidden_addr,
+            0,
+            std::ptr::null(),
+            &mut size,
+            &mut hidden as *mut u32 as *mut std::ffi::c_void,
+        ) == 0
+            && hidden != 0
+        {
+            return false;
+        }
     }
+
+    true
 }
 
 unsafe fn device_has_streams(dev_id: u32, scope: u32) -> bool {

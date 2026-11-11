@@ -1,7 +1,23 @@
+use egui_winit::winit::window::Window;
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::ffi::{c_char, c_void};
-use tao::platform::macos::WindowExtMacOS;
 
-const APP_ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
+pub const APP_ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
+
+/// Extract the underlying `NSWindow *` from a `winit::window::Window` via its `AppKit` `NSView` handle.
+pub unsafe fn get_ns_window(window: &Window) -> *mut c_void {
+    if let Ok(handle) = window.window_handle() {
+        if let RawWindowHandle::AppKit(appkit) = handle.as_raw() {
+            let ns_view = appkit.ns_view.as_ptr() as *mut c_void;
+            if !ns_view.is_null() {
+                type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+                let msg0: Msg0 = std::mem::transmute(objc_msgSend as *const c_void);
+                return msg0(ns_view, sel_registerName(c"window".as_ptr()));
+            }
+        }
+    }
+    std::ptr::null_mut()
+}
 
 /// NSWindowCollectionBehaviorCanJoinAllSpaces (1 << 0)
 /// | NSWindowCollectionBehaviorStationary (1 << 4)
@@ -150,9 +166,9 @@ unsafe extern "C" fn accepts_first_mouse_imp(
 
 /// Enable `acceptsFirstMouse:` on the window's `contentView` and all its `WKWebView` subviews
 /// so clicking on a secondary monitor's overlay window selects or drags on the 1st click instead of requiring 2 clicks.
-pub unsafe fn enable_overlay_accepts_first_mouse(window: &tao::window::Window) {
+pub unsafe fn enable_overlay_accepts_first_mouse(window: &Window) {
     let pool = objc_autoreleasePoolPush();
-    let ns_win = window.ns_window();
+    let ns_win = get_ns_window(window);
     if !ns_win.is_null() {
         type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
         type MsgCount = unsafe extern "C" fn(*mut c_void, *mut c_void) -> usize;
@@ -202,50 +218,60 @@ pub unsafe fn enable_overlay_accepts_first_mouse(window: &tao::window::Window) {
 }
 
 /// Apply the embedded minimalist AppIcon directly to the macOS Dock & Cmd+Tab switcher
+/// (only needed when running outside a `.app` bundle, as `.app` bundles use `Contents/Resources/AppIcon.icns` out-of-process).
 pub unsafe fn set_macos_dock_icon() {
-    let pool = objc_autoreleasePoolPush();
-    type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
-    type Msg1Ptr = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
-    type Msg1Obj = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> *mut c_void;
-    type MsgData =
-        unsafe extern "C" fn(*mut c_void, *mut c_void, *const u8, usize) -> *mut c_void;
+    static DOCK_ICON_ONCE: std::sync::Once = std::sync::Once::new();
+    DOCK_ICON_ONCE.call_once(|| {
+        if let Ok(exe) = std::env::current_exe() {
+            if exe.to_string_lossy().contains(".app/Contents/MacOS/") {
+                return;
+            }
+        }
+        let pool = objc_autoreleasePoolPush();
+        type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+        type Msg1Ptr = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
+        type Msg1Obj = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> *mut c_void;
+        type MsgData =
+            unsafe extern "C" fn(*mut c_void, *mut c_void, *const u8, usize) -> *mut c_void;
 
-    let msg0: Msg0 = std::mem::transmute(objc_msgSend as *const c_void);
-    let msg1_ptr: Msg1Ptr = std::mem::transmute(objc_msgSend as *const c_void);
-    let msg1_obj: Msg1Obj = std::mem::transmute(objc_msgSend as *const c_void);
-    let msg_data: MsgData = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg0: Msg0 = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_ptr: Msg1Ptr = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_obj: Msg1Obj = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg_data: MsgData = std::mem::transmute(objc_msgSend as *const c_void);
 
-    let ns_app_cls = objc_getClass(c"NSApplication".as_ptr());
-    let ns_data_cls = objc_getClass(c"NSData".as_ptr());
-    let ns_img_cls = objc_getClass(c"NSImage".as_ptr());
+        let ns_app_cls = objc_getClass(c"NSApplication".as_ptr());
+        let ns_data_cls = objc_getClass(c"NSData".as_ptr());
+        let ns_img_cls = objc_getClass(c"NSImage".as_ptr());
 
-    if !ns_app_cls.is_null() && !ns_data_cls.is_null() && !ns_img_cls.is_null() {
-        let data = msg_data(
-            ns_data_cls,
-            sel_registerName(c"dataWithBytes:length:".as_ptr()),
-            APP_ICON_PNG.as_ptr(),
-            APP_ICON_PNG.len(),
-        );
-        if !data.is_null() {
-            let img_alloc = msg0(ns_img_cls, sel_registerName(c"alloc".as_ptr()));
-            let img = msg1_obj(
-                img_alloc,
-                sel_registerName(c"initWithData:".as_ptr()),
-                data,
+        if !ns_app_cls.is_null() && !ns_data_cls.is_null() && !ns_img_cls.is_null() {
+            let data = msg_data(
+                ns_data_cls,
+                sel_registerName(c"dataWithBytes:length:".as_ptr()),
+                APP_ICON_PNG.as_ptr(),
+                APP_ICON_PNG.len(),
             );
-            if !img.is_null() {
-                let ns_app = msg0(ns_app_cls, sel_registerName(c"sharedApplication".as_ptr()));
-                if !ns_app.is_null() {
-                    msg1_ptr(
-                        ns_app,
-                        sel_registerName(c"setApplicationIconImage:".as_ptr()),
-                        img,
-                    );
+            if !data.is_null() {
+                let img_alloc = msg0(ns_img_cls, sel_registerName(c"alloc".as_ptr()));
+                let img = msg1_obj(
+                    img_alloc,
+                    sel_registerName(c"initWithData:".as_ptr()),
+                    data,
+                );
+                if !img.is_null() {
+                    let ns_app = msg0(ns_app_cls, sel_registerName(c"sharedApplication".as_ptr()));
+                    if !ns_app.is_null() {
+                        msg1_ptr(
+                            ns_app,
+                            sel_registerName(c"setApplicationIconImage:".as_ptr()),
+                            img,
+                        );
+                    }
+                    let _ = msg0(img, sel_registerName(c"release".as_ptr()));
                 }
             }
         }
-    }
-    objc_autoreleasePoolPop(pool);
+        objc_autoreleasePoolPop(pool);
+    });
 }
 
 /// Show or hide the app icon in the macOS Dock (`NSApplicationActivationPolicyRegular` = 0 vs `Accessory` = 1)
@@ -320,8 +346,8 @@ pub unsafe fn disable_macos_window_restoration() {
     objc_autoreleasePoolPop(pool);
 }
 
-pub unsafe fn set_nswindow_non_restorable(window: &tao::window::Window) {
-    let ns_win = window.ns_window();
+pub unsafe fn set_nswindow_non_restorable(window: &Window) {
+    let ns_win = get_ns_window(window);
     if !ns_win.is_null() {
         type Msg1Bool = unsafe extern "C" fn(*mut c_void, *mut c_void, bool);
         let msg1_bool: Msg1Bool = std::mem::transmute(objc_msgSend as *const c_void);
@@ -335,9 +361,9 @@ pub unsafe fn set_nswindow_non_restorable(window: &tao::window::Window) {
 
 /// Make a borderless popover/overlay NSWindow truly transparent around its rounded corners
 /// by clearing the NSWindow background color and masking the contentView's CALayer to `corner_radius`.
-pub unsafe fn set_nswindow_rounded_transparent(window: &tao::window::Window, corner_radius: f64) {
+pub unsafe fn set_nswindow_rounded_transparent(window: &Window, corner_radius: f64) {
     let pool = objc_autoreleasePoolPush();
-    let ns_win = window.ns_window();
+    let ns_win = get_ns_window(window);
     if !ns_win.is_null() {
         type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
         type Msg1Bool = unsafe extern "C" fn(*mut c_void, *mut c_void, bool);
@@ -389,6 +415,16 @@ pub unsafe fn set_nswindow_rounded_transparent(window: &tao::window::Window, cor
             );
             let layer = msg0(content_view, sel_registerName(c"layer".as_ptr()));
             if !layer.is_null() {
+                type Msg0F64 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> f64;
+                let msg0_f64: Msg0F64 = std::mem::transmute(objc_msgSend as *const c_void);
+                let scale = msg0_f64(ns_win, sel_registerName(c"backingScaleFactor".as_ptr()));
+                if scale > 0.5 {
+                    msg1_f64(
+                        layer,
+                        sel_registerName(c"setContentsScale:".as_ptr()),
+                        scale,
+                    );
+                }
                 msg1_f64(
                     layer,
                     sel_registerName(c"setCornerRadius:".as_ptr()),
@@ -409,9 +445,9 @@ pub unsafe fn set_nswindow_rounded_transparent(window: &tao::window::Window, cor
 /// and make it ignore all mouse events so a hidden overlay window can NEVER intercept clicks, flash stale frames,
 /// or freeze the screen on any Space, while preserving its display frame so `WKWebView` never has to asynchronously
 /// resize its viewport when revealing the next screenshot.
-pub unsafe fn park_overlay_window_offscreen(window: &tao::window::Window) {
+pub unsafe fn park_overlay_window_offscreen(window: &Window) {
     let pool = objc_autoreleasePoolPush();
-    let ns_win = window.ns_window();
+    let ns_win = get_ns_window(window);
     if !ns_win.is_null() {
         type Msg1Bool = unsafe extern "C" fn(*mut c_void, *mut c_void, bool);
         type Msg1Isize = unsafe extern "C" fn(*mut c_void, *mut c_void, isize);
@@ -453,9 +489,9 @@ pub unsafe fn park_overlay_window_offscreen(window: &tao::window::Window) {
 
 /// Safely hide a floating popup/drawer window (`mini_window`, `clip_window`, `alttab_window`)
 /// and make it ignore all mouse events so it can never block clicks while hidden.
-pub unsafe fn hide_floating_overlay_window(window: &tao::window::Window) {
+pub unsafe fn hide_floating_overlay_window(window: &Window) {
     let pool = objc_autoreleasePoolPush();
-    let ns_win = window.ns_window();
+    let ns_win = get_ns_window(window);
     if !ns_win.is_null() {
         type Msg1Bool = unsafe extern "C" fn(*mut c_void, *mut c_void, bool);
         type Msg1F64 = unsafe extern "C" fn(*mut c_void, *mut c_void, f64);
@@ -483,10 +519,10 @@ pub unsafe fn hide_floating_overlay_window(window: &tao::window::Window) {
 
 /// Show a floating popup/drawer window (`mini_window`, `clip_window`, `alttab_window`)
 /// and restore its opacity and mouse event handling.
-pub unsafe fn show_floating_overlay_window(window: &tao::window::Window, corner_radius: f64) {
+pub unsafe fn show_floating_overlay_window(window: &Window, corner_radius: f64) {
     set_nswindow_rounded_transparent(window, corner_radius);
     let pool = objc_autoreleasePoolPush();
-    let ns_win = window.ns_window();
+    let ns_win = get_ns_window(window);
     if !ns_win.is_null() {
         type Msg1Bool = unsafe extern "C" fn(*mut c_void, *mut c_void, bool);
         type Msg1Isize = unsafe extern "C" fn(*mut c_void, *mut c_void, isize);
@@ -521,18 +557,19 @@ pub unsafe fn show_floating_overlay_window(window: &tao::window::Window, corner_
     }
     objc_autoreleasePoolPop(pool);
     window.set_visible(true);
-    window.set_focus();
+    window.focus_window();
 }
 
-/// Check if any of the given `tao::window::Window`s is currently the active key window (`[ns_win isKeyWindow]`).
-pub unsafe fn is_any_nswindow_focused(windows: &[tao::window::Window]) -> bool {
+/// Check if any of the given `Window`s is currently the active key window (`[ns_win isKeyWindow]`).
+#[allow(dead_code)]
+pub unsafe fn is_any_nswindow_focused(windows: &[Window]) -> bool {
     let pool = objc_autoreleasePoolPush();
     type MsgBool = unsafe extern "C" fn(*mut c_void, *mut c_void) -> bool;
     let msg_bool: MsgBool = std::mem::transmute(objc_msgSend as *const c_void);
     let sel_is_key = sel_registerName(c"isKeyWindow".as_ptr());
     let mut any_key = false;
     for w in windows {
-        let ns_win = w.ns_window();
+        let ns_win = get_ns_window(w);
         if !ns_win.is_null() && msg_bool(ns_win, sel_is_key) {
             any_key = true;
             break;
@@ -544,16 +581,16 @@ pub unsafe fn is_any_nswindow_focused(windows: &[tao::window::Window]) -> bool {
 
 /// Position a borderless fullscreen overlay `NSWindow` directly onto the target display's exact
 /// Cocoa frame (`setFrame:display:animate:`) so Retina backing scale factor (`2.0`) is preserved
-/// without any cross-monitor `tao` logical-size scaling mismatch.
+/// without any cross-monitor logical-size scaling mismatch.
 pub unsafe fn place_overlay_on_display(
-    window: &tao::window::Window,
+    window: &Window,
     disp_x: i32,
     disp_y: i32,
     disp_w: usize,
     disp_h: usize,
 ) {
     let pool = objc_autoreleasePoolPush();
-    let ns_win = window.ns_window();
+    let ns_win = get_ns_window(window);
     if !ns_win.is_null() {
         type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
         type MsgRect = unsafe extern "C" fn(*mut c_void, *mut c_void) -> CocoaRect;
@@ -628,14 +665,14 @@ pub unsafe fn place_overlay_on_display(
 /// and mouse-passthrough (`ignoresMouseEvents = true`) so its `WKWebView` can decode and composite the new
 /// screenshot onto its GPU `CAMetalLayer` before the window becomes visible (`alpha = 1.0`).
 pub unsafe fn prepare_screenshot_window_hidden(
-    window: &tao::window::Window,
+    window: &Window,
     disp_x: i32,
     disp_y: i32,
     disp_w: usize,
     disp_h: usize,
 ) {
     let pool = objc_autoreleasePoolPush();
-    let ns_win = window.ns_window();
+    let ns_win = get_ns_window(window);
     if !ns_win.is_null() {
         type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
         type Msg1Bool = unsafe extern "C" fn(*mut c_void, *mut c_void, bool);
@@ -697,7 +734,7 @@ pub unsafe fn prepare_screenshot_window_hidden(
 }
 
 /// Atomically reveal an already-positioned and GPU-composited screenshot overlay window (`alpha = 1.0`).
-pub unsafe fn reveal_screenshot_window(window: &tao::window::Window, make_key: bool) {
+pub unsafe fn reveal_screenshot_window(window: &Window, make_key: bool) {
     enable_overlay_accepts_first_mouse(window);
     let pool = objc_autoreleasePoolPush();
     type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
@@ -712,7 +749,7 @@ pub unsafe fn reveal_screenshot_window(window: &tao::window::Window, make_key: b
     let msg1_f64: Msg1F64 = std::mem::transmute(objc_msgSend as *const c_void);
     let msg1_ptr: Msg1Ptr = std::mem::transmute(objc_msgSend as *const c_void);
 
-    let ns_win = window.ns_window();
+    let ns_win = get_ns_window(window);
     if !ns_win.is_null() {
         promote_to_nonactivating_overlay_panel(ns_win);
         msg1_bool(
@@ -774,7 +811,7 @@ pub unsafe fn reveal_screenshot_window(window: &tao::window::Window, make_key: b
 /// keep `main_window` ordered behind and restore active focus to that previous application so `main_window`
 /// never unexpectedly pops in front of the user's workspace.
 pub unsafe fn restore_previous_frontmost_app(
-    main_window: &tao::window::Window,
+    main_window: &Window,
     prev_pid: i32,
 ) {
     let my_pid = std::process::id() as i32;
@@ -790,8 +827,8 @@ pub unsafe fn restore_previous_frontmost_app(
     let msg_pid: MsgPid = std::mem::transmute(objc_msgSend as *const c_void);
     let msg_act: MsgAct = std::mem::transmute(objc_msgSend as *const c_void);
 
-    if main_window.is_visible() {
-        let main_ns = main_window.ns_window();
+    if main_window.is_visible().unwrap_or(false) {
+        let main_ns = get_ns_window(main_window);
         if !main_ns.is_null() {
             msg1_ptr(
                 main_ns,
@@ -818,7 +855,7 @@ pub unsafe fn restore_previous_frontmost_app(
 
 /// Activate the macOS application and optionally raise an overlay NSWindow above the Menu Bar & Dock
 pub unsafe fn focus_and_elevate_macos_window(
-    window: &tao::window::Window,
+    window: &Window,
     above_menubar: bool,
     make_key: bool,
 ) {
@@ -835,7 +872,7 @@ pub unsafe fn focus_and_elevate_macos_window(
     let msg1_f64: Msg1F64 = std::mem::transmute(objc_msgSend as *const c_void);
     let msg1_ptr: Msg1Ptr = std::mem::transmute(objc_msgSend as *const c_void);
 
-    let ns_win = window.ns_window();
+    let ns_win = get_ns_window(window);
     if !ns_win.is_null() {
         promote_to_nonactivating_overlay_panel(ns_win);
         msg1_bool(
@@ -918,9 +955,9 @@ struct CocoaRect {
 
 /// Directly snap a `tao::window::Window` using Cocoa `[NSWindow setFrame:display:animate:]`
 /// so snapping works reliably even when our own app window is frontmost (or before Accessibility is granted).
-pub unsafe fn snap_nswindow_directly(window: &tao::window::Window, layout: &str) {
+pub unsafe fn snap_nswindow_directly(window: &Window, layout: &str) {
     let pool = objc_autoreleasePoolPush();
-    let ns_win = window.ns_window();
+    let ns_win = get_ns_window(window);
     if !ns_win.is_null() {
         type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
         type MsgRect = unsafe extern "C" fn(*mut c_void, *mut c_void) -> CocoaRect;
@@ -1143,9 +1180,9 @@ pub unsafe fn snap_nswindow_directly(window: &tao::window::Window, layout: &str)
 
 /// Position the main launcher window at **Center 75% width, 100% full usable vertical height**
 /// (`visibleFrame`, from right below the macOS Menu Bar down to right against the Dock).
-pub unsafe fn place_main_window_center_75_full_height(window: &tao::window::Window) {
+pub unsafe fn place_main_window_center_75_full_height(window: &Window) {
     let pool = objc_autoreleasePoolPush();
-    let ns_win = window.ns_window();
+    let ns_win = get_ns_window(window);
     if !ns_win.is_null() {
         type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
         type MsgRect = unsafe extern "C" fn(*mut c_void, *mut c_void) -> CocoaRect;
@@ -1194,6 +1231,269 @@ extern "C" {
     fn malloc_zone_pressure_relief(zone: *mut c_void, goal: usize) -> usize;
 }
 
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGColorSpaceCreateDeviceRGB() -> *mut c_void;
+    fn CGColorSpaceRelease(space: *mut c_void);
+    fn CGImageGetWidth(image: *mut c_void) -> usize;
+    fn CGImageGetHeight(image: *mut c_void) -> usize;
+    fn CGImageRelease(image: *mut c_void);
+    fn CGBitmapContextCreate(
+        data: *mut c_void,
+        width: usize,
+        height: usize,
+        bits_per_component: usize,
+        bytes_per_row: usize,
+        space: *mut c_void,
+        bitmap_info: u32,
+    ) -> *mut c_void;
+    fn CGBitmapContextCreateImage(context: *mut c_void) -> *mut c_void;
+    fn CGContextDrawImage(c: *mut c_void, rect: CocoaRect, image: *mut c_void);
+    fn CGContextRelease(c: *mut c_void);
+}
+
+/// kCGImageAlphaPremultipliedLast (1) | kCGBitmapByteOrder32Big (4 << 12) => RGBA8 byte order in memory
+const CG_RGBA8_BITMAP_INFO: u32 = 1 | (4 << 12);
+
+/// Hardware-accelerated PNG / JPEG / TIFF / ICNS decoding into raw `RGBA8` `(width, height, Vec<u8>)`
+/// using macOS `NSBitmapImageRep` + `CoreGraphics`.
+#[allow(dead_code)]
+pub fn decode_image_bytes_to_rgba8(bytes: &[u8]) -> Option<(usize, usize, Vec<u8>)> {
+    decode_image_bytes_to_rgba8_max_size(bytes, 0)
+}
+
+/// Hardware-accelerated PNG / JPEG / TIFF / ICNS decoding into raw `RGBA8` `(width, height, Vec<u8>)`,
+/// optionally downscaled in CoreGraphics so `width <= max_dim` and `height <= max_dim` when `max_dim > 0`.
+pub fn decode_image_bytes_to_rgba8_max_size(
+    bytes: &[u8],
+    max_dim: usize,
+) -> Option<(usize, usize, Vec<u8>)> {
+    if bytes.is_empty() {
+        return None;
+    }
+    unsafe {
+        let pool = objc_autoreleasePoolPush();
+        type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+        type Msg1Obj = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> *mut c_void;
+        type MsgData =
+            unsafe extern "C" fn(*mut c_void, *mut c_void, *const u8, usize) -> *mut c_void;
+
+        let msg0: Msg0 = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_obj: Msg1Obj = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg_data: MsgData = std::mem::transmute(objc_msgSend as *const c_void);
+
+        let ns_data_cls = objc_getClass(c"NSData".as_ptr());
+        let ns_rep_cls = objc_getClass(c"NSBitmapImageRep".as_ptr());
+        if ns_data_cls.is_null() || ns_rep_cls.is_null() {
+            objc_autoreleasePoolPop(pool);
+            return None;
+        }
+
+        let data = msg_data(
+            ns_data_cls,
+            sel_registerName(c"dataWithBytes:length:".as_ptr()),
+            bytes.as_ptr(),
+            bytes.len(),
+        );
+        if data.is_null() {
+            objc_autoreleasePoolPop(pool);
+            return None;
+        }
+
+        let rep = msg1_obj(
+            ns_rep_cls,
+            sel_registerName(c"imageRepWithData:".as_ptr()),
+            data,
+        );
+        if rep.is_null() {
+            objc_autoreleasePoolPop(pool);
+            return None;
+        }
+
+        let cg_img = msg0(rep, sel_registerName(c"CGImage".as_ptr()));
+        if cg_img.is_null() {
+            objc_autoreleasePoolPop(pool);
+            return None;
+        }
+
+        let src_w = CGImageGetWidth(cg_img);
+        let src_h = CGImageGetHeight(cg_img);
+        if src_w == 0 || src_h == 0 || src_w > 16384 || src_h > 16384 {
+            objc_autoreleasePoolPop(pool);
+            return None;
+        }
+
+        let (width, height) = if max_dim > 0 && (src_w > max_dim || src_h > max_dim) {
+            let scale = (max_dim as f64 / src_w as f64).min(max_dim as f64 / src_h as f64);
+            (
+                ((src_w as f64 * scale).round() as usize).max(1),
+                ((src_h as f64 * scale).round() as usize).max(1),
+            )
+        } else {
+            (src_w, src_h)
+        };
+
+        let mut rgba = vec![0u8; width * height * 4];
+        let color_space = CGColorSpaceCreateDeviceRGB();
+        let ctx = CGBitmapContextCreate(
+            rgba.as_mut_ptr() as *mut c_void,
+            width,
+            height,
+            8,
+            width * 4,
+            color_space,
+            CG_RGBA8_BITMAP_INFO,
+        );
+        if ctx.is_null() {
+            if !color_space.is_null() {
+                CGColorSpaceRelease(color_space);
+            }
+            objc_autoreleasePoolPop(pool);
+            return None;
+        }
+
+        CGContextDrawImage(
+            ctx,
+            CocoaRect {
+                origin: CocoaPoint { x: 0.0, y: 0.0 },
+                size: CocoaSize {
+                    width: width as f64,
+                    height: height as f64,
+                },
+            },
+            cg_img,
+        );
+
+        CGContextRelease(ctx);
+        if !color_space.is_null() {
+            CGColorSpaceRelease(color_space);
+        }
+        objc_autoreleasePoolPop(pool);
+        Some((width, height, rgba))
+    }
+}
+
+/// Decode a `data:image/...;base64,...` URL or a local file path into `(width, height, Vec<u8>)` RGBA8.
+pub fn decode_data_url_or_path_to_rgba8(input: &str) -> Option<(usize, usize, Vec<u8>)> {
+    decode_data_url_or_path_to_rgba8_max_size(input, 640)
+}
+
+/// Decode a `data:image/...;base64,...` URL or a local file path into `(width, height, Vec<u8>)` RGBA8
+/// with optional downscaling (`max_dim`).
+pub fn decode_data_url_or_path_to_rgba8_max_size(
+    input: &str,
+    max_dim: usize,
+) -> Option<(usize, usize, Vec<u8>)> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.starts_with("data:image/") {
+        if let Ok(bytes) = core_clipboard::decode_base64_png(trimmed) {
+            return decode_image_bytes_to_rgba8_max_size(&bytes, max_dim);
+        }
+        return None;
+    }
+    if let Ok(bytes) = std::fs::read(trimmed) {
+        return decode_image_bytes_to_rgba8_max_size(&bytes, max_dim);
+    }
+    None
+}
+
+/// Hardware-accelerated encoding of raw `RGBA8` pixels `(width, height, &[u8])` into PNG bytes
+/// using macOS `CoreGraphics` + `NSBitmapImageRep`.
+pub fn encode_rgba8_to_png(width: usize, height: usize, rgba: &[u8]) -> Option<Vec<u8>> {
+    if width == 0 || height == 0 || rgba.len() < width.saturating_mul(height).saturating_mul(4) {
+        return None;
+    }
+    unsafe {
+        let pool = objc_autoreleasePoolPush();
+        let color_space = CGColorSpaceCreateDeviceRGB();
+        let ctx = CGBitmapContextCreate(
+            rgba.as_ptr() as *mut c_void,
+            width,
+            height,
+            8,
+            width * 4,
+            color_space,
+            CG_RGBA8_BITMAP_INFO,
+        );
+        if ctx.is_null() {
+            if !color_space.is_null() {
+                CGColorSpaceRelease(color_space);
+            }
+            objc_autoreleasePoolPop(pool);
+            return None;
+        }
+
+        let cg_img = CGBitmapContextCreateImage(ctx);
+        CGContextRelease(ctx);
+        if !color_space.is_null() {
+            CGColorSpaceRelease(color_space);
+        }
+        if cg_img.is_null() {
+            objc_autoreleasePoolPop(pool);
+            return None;
+        }
+
+        type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+        type Msg1Obj = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> *mut c_void;
+        type MsgRepPng = unsafe extern "C" fn(
+            *mut c_void,
+            *mut c_void,
+            usize,
+            *mut c_void,
+        ) -> *mut c_void;
+        type MsgLen = unsafe extern "C" fn(*mut c_void, *mut c_void) -> usize;
+        type MsgBytes = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *const u8;
+
+        let msg0: Msg0 = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_obj: Msg1Obj = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg_rep_png: MsgRepPng = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg_len: MsgLen = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg_bytes: MsgBytes = std::mem::transmute(objc_msgSend as *const c_void);
+
+        let ns_rep_cls = objc_getClass(c"NSBitmapImageRep".as_ptr());
+        let ns_dict_cls = objc_getClass(c"NSDictionary".as_ptr());
+        let mut out_vec = None;
+        if !ns_rep_cls.is_null() {
+            let empty_dict = if !ns_dict_cls.is_null() {
+                msg0(ns_dict_cls, sel_registerName(c"dictionary".as_ptr()))
+            } else {
+                std::ptr::null_mut()
+            };
+            let rep_alloc = msg0(ns_rep_cls, sel_registerName(c"alloc".as_ptr()));
+            let rep = msg1_obj(
+                rep_alloc,
+                sel_registerName(c"initWithCGImage:".as_ptr()),
+                cg_img,
+            );
+            if !rep.is_null() {
+                // NSBitmapImageFileTypePNG = 4
+                let png_data = msg_rep_png(
+                    rep,
+                    sel_registerName(c"representationUsingType:properties:".as_ptr()),
+                    4,
+                    empty_dict,
+                );
+                if !png_data.is_null() {
+                    let len = msg_len(png_data, sel_registerName(c"length".as_ptr()));
+                    let ptr = msg_bytes(png_data, sel_registerName(c"bytes".as_ptr()));
+                    if len > 0 && !ptr.is_null() {
+                        let slice = std::slice::from_raw_parts(ptr, len);
+                        out_vec = Some(slice.to_vec());
+                    }
+                }
+                let _ = msg0(rep, sel_registerName(c"release".as_ptr()));
+            }
+        }
+
+        CGImageRelease(cg_img);
+        objc_autoreleasePoolPop(pool);
+        out_vec
+    }
+}
+
 /// Release cached dashboard/cleaner heap allocations and advise macOS `libmalloc`
 /// to return free magazine pages to the kernel when windows are hidden to the background.
 pub fn release_process_heap_memory() {
@@ -1201,6 +1501,35 @@ pub fn release_process_heap_memory() {
     core_cleaner::release_cleaner_memory();
     unsafe {
         let _ = malloc_zone_pressure_relief(std::ptr::null_mut(), 0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_coregraphics_rgba8_png_roundtrip_and_app_icon() {
+        let (icon_w, icon_h, icon_rgba) =
+            decode_image_bytes_to_rgba8(APP_ICON_PNG).expect("Should decode embedded APP_ICON_PNG");
+        assert!(icon_w > 0 && icon_h > 0);
+        assert_eq!(icon_rgba.len(), icon_w * icon_h * 4);
+
+        let w = 4usize;
+        let h = 3usize;
+        let mut raw = Vec::with_capacity(w * h * 4);
+        for i in 0..(w * h) {
+            raw.push(((i * 37) & 0xFF) as u8);
+            raw.push(((i * 73) & 0xFF) as u8);
+            raw.push(((i * 113) & 0xFF) as u8);
+            raw.push(255);
+        }
+        let png = encode_rgba8_to_png(w, h, &raw).expect("Should encode RGBA8 to PNG");
+        assert!(png.starts_with(b"\x89PNG"));
+        let (dw, dh, decoded) =
+            decode_image_bytes_to_rgba8(&png).expect("Should decode encoded PNG");
+        assert_eq!((dw, dh), (w, h));
+        assert_eq!(decoded, raw);
     }
 }
 

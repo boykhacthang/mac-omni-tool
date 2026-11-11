@@ -1,7 +1,7 @@
 use crate::events::{screenshot_session, AppUserEvent};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tao::event_loop::EventLoopProxy;
+use egui_winit::winit::event_loop::EventLoopProxy;
 
 #[derive(Debug, Deserialize)]
 pub struct ApiRequest {

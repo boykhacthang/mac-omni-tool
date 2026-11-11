@@ -21,8 +21,9 @@ pub use models::{
     AudioDeviceInfo, AudioSystemState, DisplayColorState, DisplayInfo, DisplaySystemState,
 };
 pub use screenshot::{
-    capture_all_displays_png, capture_display_png, find_display_containing_point,
-    get_display_at_mouse_cursor, get_mouse_cursor_position,
+    capture_all_displays_png, capture_all_displays_rgba8, capture_display_png,
+    capture_display_rgba8, find_display_containing_point, get_display_at_mouse_cursor,
+    get_mouse_cursor_position, CapturedDisplayRgba,
 };
 
 #[cfg(test)]

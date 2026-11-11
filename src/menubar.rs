@@ -6,7 +6,7 @@ use crate::macos_window::{
 use std::ffi::{c_char, c_void, CString};
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::{Mutex, OnceLock};
-use tao::event_loop::EventLoopProxy;
+use egui_winit::winit::event_loop::EventLoopProxy;
 
 static MENUBAR_EVENT_PROXY: OnceLock<Mutex<Option<EventLoopProxy<AppUserEvent>>>> = OnceLock::new();
 static STATUS_ITEM_PTR: AtomicIsize = AtomicIsize::new(0);

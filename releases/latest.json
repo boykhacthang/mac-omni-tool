@@ -1,9 +1,9 @@
 {
-  "version": "2.2.1",
-  "published_at": "2026-11-06",
-  "zip_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.2.1/MacOmniTool-v2.2.1-macOS.zip",
-  "dmg_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.2.1/MacOmniTool-v2.2.1-Installer.dmg",
-  "sha256_zip": "2575e075fd987bef956b23b11fcab406df873d74cd99eb2ca9ea81c4510f38ea",
-  "notes_en": "Deep RAM (-61%) & Idle CPU (0%) Optimization: release GPU IOSurface buffers when screenshot overlay is hidden, mode-aware JS loading, direct IOKit GPU FFI, 64x64 CGImage icons, and persistent SQLite connection.",
-  "notes_vi": "T\u1ed1i \u01b0u s\u00e2u RAM (-61%) & CPU Idle (0%): gi\u1ea3i ph\u00f3ng IOSurface GPU khi \u1ea9n Screenshot, t\u1ea3i JS theo mode, \u0111\u1ecdc GPU tr\u1ef1c ti\u1ebfp qua IOKit FFI, n\u00e9n icon 64x64 v\u00e0 gi\u1eef k\u1ebft n\u1ed1i SQLite b\u1ec1n v\u1eefng."
+  "version": "2.3.0",
+  "published_at": "2026-11-11",
+  "zip_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.3.0/MacOmniTool-v2.3.0-macOS.zip",
+  "dmg_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.3.0/MacOmniTool-v2.3.0-Installer.dmg",
+  "sha256_zip": "c0fdb34472e9c4b600a549d7bbe5fbc29c3f3f237338612a7bd1331e9cddc514",
+  "notes_en": "Pure Rust + Metal GPU UI (egui + wgpu), instant region screenshot with default Rectangle tool, middle-truncation for long filenames, live AirPods/Audio connection status refresh, plus delete confirmation modal & multi-select Large Files with 0ms instant table updates.",
+  "notes_vi": "Ki\u1ebfn tr\u00fac Pure Rust + Metal GPU UI (egui + wgpu), ch\u1ee5p v\u00f9ng si\u00eau t\u1ed1c m\u1eb7c \u0111\u1ecbnh c\u00f4ng c\u1ee5 Khung ch\u1eef nh\u1eadt, r\u00fat g\u1ecdn t\u00ean file d\u00e0i \u1edf gi\u1eefa, t\u1ef1 \u0111\u1ed9ng c\u1eadp nh\u1eadt tr\u1ea1ng th\u00e1i k\u1ebft n\u1ed1i AirPods/Loa, k\u00e8m h\u1ed9p tho\u1ea1i x\u00e1c nh\u1eadn x\u00f3a & ch\u1ecdn nhi\u1ec1u File L\u1edbn c\u1eadp nh\u1eadt b\u1ea3ng t\u1ee9c th\u00ec 0ms."
 }

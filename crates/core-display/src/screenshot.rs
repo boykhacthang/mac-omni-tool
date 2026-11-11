@@ -1,9 +1,122 @@
 //! Mouse cursor display detection and multi-monitor parallel PNG screenshot capture.
 
 use crate::brightness::list_displays;
-use crate::ffi::{CFRelease, CGEventCreate, CGEventGetLocation};
+use crate::ffi::{
+    CFRelease, CGBitmapContextCreate, CGColorSpaceCreateDeviceRGB, CGColorSpaceRelease,
+    CGContextDrawImage, CGContextRelease, CGDisplayCreateImage, CGEventCreate, CGEventGetLocation,
+    CGImageGetHeight, CGImageGetWidth, CGImageRelease, CGPoint, CGRect, CGSize,
+};
 use crate::models::DisplayInfo;
+use std::ffi::c_void;
 use std::process::Command;
+
+#[derive(Clone)]
+pub struct CapturedDisplayRgba {
+    pub display: DisplayInfo,
+    pub pixel_w: usize,
+    pub pixel_h: usize,
+    pub rgba: Vec<u8>,
+}
+
+/// Fast in-memory display capture directly to `RGBA8` via CoreGraphics `CGDisplayCreateImage` (~65ms, 10x faster than `/usr/sbin/screencapture`).
+pub fn capture_display_rgba8(display: &DisplayInfo) -> Result<CapturedDisplayRgba, String> {
+    unsafe {
+        let cg_img = CGDisplayCreateImage(display.id);
+        if !cg_img.is_null() {
+            let w = CGImageGetWidth(cg_img);
+            let h = CGImageGetHeight(cg_img);
+            if w > 0 && h > 0 {
+                let mut rgba = vec![0u8; w * h * 4];
+                let cs = CGColorSpaceCreateDeviceRGB();
+                if !cs.is_null() {
+                    // kCGImageAlphaPremultipliedLast (1) | kCGBitmapByteOrder32Big (4 << 12) = 16385 -> standard RGBA8
+                    let bitmap_info: u32 = 1 | (4 << 12);
+                    let ctx = CGBitmapContextCreate(
+                        rgba.as_mut_ptr() as *mut c_void,
+                        w,
+                        h,
+                        8,
+                        w * 4,
+                        cs,
+                        bitmap_info,
+                    );
+                    if !ctx.is_null() {
+                        let rect = CGRect {
+                            origin: CGPoint { x: 0.0, y: 0.0 },
+                            size: CGSize {
+                                width: w as f64,
+                                height: h as f64,
+                            },
+                        };
+                        CGContextDrawImage(ctx, rect, cg_img);
+                        CGContextRelease(ctx);
+                        CGColorSpaceRelease(cs);
+                        CGImageRelease(cg_img);
+                        return Ok(CapturedDisplayRgba {
+                            display: display.clone(),
+                            pixel_w: w,
+                            pixel_h: h,
+                            rgba,
+                        });
+                    }
+                    CGColorSpaceRelease(cs);
+                }
+            }
+            CGImageRelease(cg_img);
+        }
+    }
+
+    Err(
+        "Không thể chụp màn hình trực tiếp qua CoreGraphics. Vui lòng kiểm tra quyền Screen Recording."
+            .to_string(),
+    )
+}
+
+/// Simultaneously capture all connected displays directly into `RGBA8` in memory (~65ms total).
+pub fn capture_all_displays_rgba8() -> Result<Vec<CapturedDisplayRgba>, String> {
+    let displays = list_displays();
+    if displays.is_empty() {
+        let fallback = get_display_at_mouse_cursor();
+        let cap = capture_display_rgba8(&fallback)?;
+        return Ok(vec![cap]);
+    }
+
+    let results: Vec<Result<CapturedDisplayRgba, String>> = std::thread::scope(|s| {
+        let handles: Vec<_> = displays
+            .iter()
+            .map(|disp| {
+                let d = disp.clone();
+                s.spawn(move || capture_display_rgba8(&d))
+            })
+            .collect();
+
+        handles
+            .into_iter()
+            .map(|h| {
+                h.join()
+                    .unwrap_or_else(|_| Err("Lỗi luồng chụp màn hình".to_string()))
+            })
+            .collect()
+    });
+
+    let mut out = Vec::with_capacity(results.len());
+    let mut last_err = String::new();
+    for res in results {
+        match res {
+            Ok(cap) => out.push(cap),
+            Err(e) => last_err = e,
+        }
+    }
+
+    if out.is_empty() {
+        return Err(if last_err.is_empty() {
+            "Không thể chụp màn hình. Vui lòng kiểm tra quyền Screen Recording.".to_string()
+        } else {
+            last_err
+        });
+    }
+    Ok(out)
+}
 
 /// Get current global mouse cursor position in CoreGraphics logical display coordinates.
 pub fn get_mouse_cursor_position() -> (f64, f64) {

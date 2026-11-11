@@ -56,6 +56,23 @@ extern "C" {
     pub fn CGDisplayRestoreColorSyncSettings();
     pub fn CGEventCreate(source: *const c_void) -> *mut c_void;
     pub fn CGEventGetLocation(event: *const c_void) -> CGPoint;
+    pub fn CGDisplayCreateImage(display_id: CGDirectDisplayID) -> *mut c_void;
+    pub fn CGImageRelease(image: *mut c_void);
+    pub fn CGImageGetWidth(image: *const c_void) -> usize;
+    pub fn CGImageGetHeight(image: *const c_void) -> usize;
+    pub fn CGColorSpaceCreateDeviceRGB() -> *mut c_void;
+    pub fn CGColorSpaceRelease(cs: *mut c_void);
+    pub fn CGBitmapContextCreate(
+        data: *mut c_void,
+        width: usize,
+        height: usize,
+        bits_per_component: usize,
+        bytes_per_row: usize,
+        space: *mut c_void,
+        bitmap_info: u32,
+    ) -> *mut c_void;
+    pub fn CGContextDrawImage(c: *mut c_void, rect: CGRect, image: *mut c_void);
+    pub fn CGContextRelease(c: *mut c_void);
 }
 
 #[link(name = "CoreFoundation", kind = "framework")]

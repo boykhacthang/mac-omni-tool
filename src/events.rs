@@ -7,6 +7,9 @@ pub struct ScreenshotSlotData {
     pub display_id: u32,
     pub display_name: String,
     pub png_bytes: Vec<u8>,
+    pub pixel_w: usize,
+    pub pixel_h: usize,
+    pub raw_rgba: Vec<u8>,
     pub x: i32,
     pub y: i32,
     pub width: usize,
@@ -44,6 +47,7 @@ pub fn screenshot_session() -> &'static Mutex<ActiveScreenshotSession> {
     })
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum AppUserEvent {
     ToggleMenuBarPopover,

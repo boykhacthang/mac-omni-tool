@@ -328,6 +328,12 @@ pub fn poll_pasteboard_once() {
 
         let current_count = msg0_isize(pb, sel_change_count);
         let prev_count = LAST_CHANGE_COUNT.load(Ordering::Relaxed);
+        if prev_count == -1 {
+            // Seed initial changeCount on startup without pulling a stale 4K TIFF into NSPasteboard's in-process cache
+            LAST_CHANGE_COUNT.store(current_count, Ordering::Relaxed);
+            objc_autoreleasePoolPop(pool);
+            return;
+        }
         if current_count == prev_count {
             objc_autoreleasePoolPop(pool);
             return;

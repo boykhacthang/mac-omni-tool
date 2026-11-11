@@ -23,9 +23,10 @@ pub use models::{
     JunkScanSummary, LargeFileEntry, OrphanedBackgroundItem, TrashItem, TrashStatus,
 };
 pub use scan_manager::{
-    get_cleaner_scan_status, invalidate_cleaner_cache, prewarm_cleaner_cache,
-    release_cleaner_memory, scan_installed_applications_cached, scan_system_junk_cached,
-    start_cleaner_scan_async,
+    filter_duplicates_by_excludes_in_cached_scan, get_cleaner_scan_status,
+    invalidate_cleaner_cache, prewarm_cleaner_cache, release_cleaner_memory,
+    remove_deleted_paths_from_cached_scan, remove_uninstalled_app_from_cached_scan,
+    scan_installed_applications_cached, scan_system_junk_cached, start_cleaner_scan_async,
 };
 pub use trash_and_junk::{
     clean_selected_paths, clean_selected_paths_ext, compute_dir_size, compute_dir_size_fast,
