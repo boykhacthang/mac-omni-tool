@@ -327,25 +327,32 @@ impl OmniGpuApp {
     }
 
     fn hide_screenshot_overlays(&mut self) {
-        let prev_pid = {
+        let (was_revealed, prev_pid) = {
             let mut sess = screenshot_session().lock().unwrap();
+            let rev = sess.revealed;
             sess.revealed = false;
             sess.active_slot = None;
             sess.capturing = false;
             sess.slots.clear();
-            std::mem::replace(&mut sess.prev_frontmost_pid, 0)
+            (rev, std::mem::replace(&mut sess.prev_frontmost_pid, 0))
         };
+        let any_vis = was_revealed || self.any_screenshot_visible();
         for surf in &mut self.screenshot_surfaces {
-            unsafe {
-                park_overlay_window_offscreen(&surf.window);
+            if surf.window.is_visible().unwrap_or(false) || surf.surface.is_some() {
+                unsafe {
+                    park_overlay_window_offscreen(&surf.window);
+                }
+                surf.suspend_surface(&self.gpu);
             }
-            surf.suspend_surface(&self.gpu);
         }
         self.screenshot_ui.clear_all();
-        if let Some(main) = &self.main_surface {
-            unsafe {
-                restore_previous_frontmost_app(&main.window, prev_pid);
+        if any_vis {
+            if let Some(main) = &self.main_surface {
+                unsafe {
+                    restore_previous_frontmost_app(&main.window, prev_pid);
+                }
             }
+            release_process_heap_memory();
         }
         let clip_vis = self
             .clip_surface
@@ -360,7 +367,6 @@ impl OmniGpuApp {
         if !clip_vis && !alttab_vis {
             core_input::set_overlay_escape_hotkey_active(false);
         }
-        release_process_heap_memory();
     }
 
     fn show_main_dashboard(&mut self) {
@@ -911,6 +917,7 @@ impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
                         }
                     }
                 }
+                release_process_heap_memory();
 
                 // Atomically reveal all displays now that their Metal textures are rendered
                 let count = self.screenshot_surfaces.len();

@@ -2,5 +2,5 @@
 58853e91702121ca2c9566abb54fd7d60446680cd787b38f2a77cc4a5287df1f  releases/v2.2.0/MacOmniTool-v2.2.0-macOS.zip
 017d373f13a0cd19c6f78b5628e5f758bc2c78cf23847093c5c8fb7ae3e25120  releases/v2.2.1/MacOmniTool-v2.2.1-Installer.dmg
 2575e075fd987bef956b23b11fcab406df873d74cd99eb2ca9ea81c4510f38ea  releases/v2.2.1/MacOmniTool-v2.2.1-macOS.zip
-db99a36e02461b20f63261d6f442fd91d7eef202454ba55485a812995ae32a3e  releases/v2.3.1/MacOmniTool-v2.3.1-Installer.dmg
-4d43cb055443c9021f25bd8c23353fe2df9e78151c474383d812ed422c5a2288  releases/v2.3.1/MacOmniTool-v2.3.1-macOS.zip
+92eb0397223c6395cb56266b600acd3b5bcee8eb72954f6bfd26c98e4689392d  releases/v2.3.1/MacOmniTool-v2.3.1-Installer.dmg
+0cfa371da825b2d8f37e4d6516f6baff53b1b20931dd5495146ac5dfa337c2e0  releases/v2.3.1/MacOmniTool-v2.3.1-macOS.zip

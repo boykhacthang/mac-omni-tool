@@ -400,6 +400,9 @@ impl WindowGpuSurface {
                 self.config.width = size.width.max(1);
                 self.config.height = size.height.max(1);
                 surface.configure(&gpu.device, &self.config);
+                unsafe {
+                    crate::macos_window::optimize_nswindow_metal_layer(&self.window);
+                }
                 self.surface = Some(surface);
             }
         }
@@ -418,6 +421,9 @@ impl WindowGpuSurface {
     /// (GPU textures/buffers), and `egui::Context` caches when the window is hidden to the background
     /// so hidden windows consume 0 MB of swapchain `IOSurface`s, 0 MB of `wgpu::Texture`s, and 0 MB of CPU caches.
     pub fn suspend_surface(&mut self, gpu: &GpuContext) {
+        if self.surface.is_none() && self.renderer.is_none() && !self.fonts_loaded {
+            return;
+        }
         self.surface = None;
         self.renderer = None;
         self.egui_ctx = egui::Context::default();
@@ -432,10 +438,11 @@ impl WindowGpuSurface {
         );
         self.fonts_loaded = false;
         self.last_theme_light = None;
+        gpu.trim_command_queue();
         unsafe {
             crate::macos_window::release_nswindow_metal_layer(&self.window);
         }
-        gpu.trim_command_queue();
+        crate::macos_window::release_process_heap_memory();
     }
 
     pub fn resize(&mut self, gpu: &GpuContext, width: u32, height: u32) {

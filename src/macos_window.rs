@@ -485,6 +485,7 @@ pub unsafe fn park_overlay_window_offscreen(window: &Window) {
         );
     }
     objc_autoreleasePoolPop(pool);
+    window.set_visible(false);
 }
 
 /// Safely hide a floating popup/drawer window (`mini_window`, `clip_window`, `alttab_window`)
@@ -517,10 +518,50 @@ pub unsafe fn hide_floating_overlay_window(window: &Window) {
     window.set_visible(false);
 }
 
-/// Detach and release the `CAMetalLayer` (and its backing `IOSurface` swapchain drawables)
-/// from `window.contentView` when the window is hidden to the background.
-/// When the window is later shown again, `wgpu::Instance::create_surface` automatically
-/// creates and attaches a fresh `CAMetalLayer`.
+/// Enable Apple Silicon lossless GPU `IOSurface` compression on the window's `CAMetalLayer`
+/// and ensure its `frame` and `contentsScale` match `contentView.bounds`.
+pub unsafe fn optimize_nswindow_metal_layer(window: &Window) {
+    let pool = objc_autoreleasePoolPush();
+    let ns_win = get_ns_window(window);
+    if !ns_win.is_null() {
+        type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+        type Msg1Bool = unsafe extern "C" fn(*mut c_void, *mut c_void, bool);
+        type Msg1BoolRet = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> bool;
+
+        let msg0: Msg0 = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_bool: Msg1Bool = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_bool_ret: Msg1BoolRet = std::mem::transmute(objc_msgSend as *const c_void);
+
+        let content_view = msg0(ns_win, sel_registerName(c"contentView".as_ptr()));
+        if !content_view.is_null() {
+            let layer = msg0(content_view, sel_registerName(c"layer".as_ptr()));
+            let metal_cls = objc_getClass(c"CAMetalLayer".as_ptr());
+            if !layer.is_null()
+                && !metal_cls.is_null()
+                && msg1_bool_ret(
+                    layer,
+                    sel_registerName(c"isKindOfClass:".as_ptr()),
+                    metal_cls,
+                )
+            {
+                let sel_comp = sel_registerName(c"setWantsIOSurfaceCompression:".as_ptr());
+                if msg1_bool_ret(
+                    layer,
+                    sel_registerName(c"respondsToSelector:".as_ptr()),
+                    sel_comp,
+                ) {
+                    msg1_bool(layer, sel_comp, true);
+                }
+            }
+        }
+    }
+    objc_autoreleasePoolPop(pool);
+}
+
+/// Purge all `IOSurface` backbuffers and cached drawable contents from `window.contentView`'s
+/// `CAMetalLayer` in-place when the window is hidden to the background.
+/// Keeps the `CAMetalLayer` instance attached to `contentView` so `wgpu` reuses it cleanly on reopen
+/// without leaking layers or throwing Objective-C selector exceptions on non-Metal backing layers.
 pub unsafe fn release_nswindow_metal_layer(window: &Window) {
     let pool = objc_autoreleasePoolPush();
     let ns_win = get_ns_window(window);
@@ -532,43 +573,69 @@ pub unsafe fn release_nswindow_metal_layer(window: &Window) {
             height: f64,
         }
         type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+        type Msg0Void = unsafe extern "C" fn(*mut c_void, *mut c_void);
         type Msg1Ptr = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
         type Msg1Size = unsafe extern "C" fn(*mut c_void, *mut c_void, ObjcSize);
+        type Msg1BoolRet = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> bool;
+
         let msg0: Msg0 = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg0_void: Msg0Void = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_ptr: Msg1Ptr = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_size: Msg1Size = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_bool_ret: Msg1BoolRet = std::mem::transmute(objc_msgSend as *const c_void);
 
         let content_view = msg0(ns_win, sel_registerName(c"contentView".as_ptr()));
         if !content_view.is_null() {
-            let old_layer = msg0(content_view, sel_registerName(c"layer".as_ptr()));
-            if !old_layer.is_null() {
+            let layer = msg0(content_view, sel_registerName(c"layer".as_ptr()));
+            let metal_cls = objc_getClass(c"CAMetalLayer".as_ptr());
+            if !layer.is_null()
+                && !metal_cls.is_null()
+                && msg1_bool_ret(
+                    layer,
+                    sel_registerName(c"isKindOfClass:".as_ptr()),
+                    metal_cls,
+                )
+            {
                 msg1_size(
-                    old_layer,
+                    layer,
                     sel_registerName(c"setDrawableSize:".as_ptr()),
                     ObjcSize {
-                        width: 0.0,
-                        height: 0.0,
+                        width: 1.0,
+                        height: 1.0,
                     },
                 );
+                let sel_next = sel_registerName(c"nextDrawable".as_ptr());
+                if msg1_bool_ret(
+                    layer,
+                    sel_registerName(c"respondsToSelector:".as_ptr()),
+                    sel_next,
+                ) {
+                    let tiny_drawable = msg0(layer, sel_next);
+                    if !tiny_drawable.is_null() {
+                        msg0_void(tiny_drawable, sel_registerName(c"present".as_ptr()));
+                    }
+                }
                 msg1_ptr(
-                    old_layer,
+                    layer,
                     sel_registerName(c"setContents:".as_ptr()),
                     std::ptr::null_mut(),
                 );
-                msg1_ptr(
-                    old_layer,
-                    sel_registerName(c"setDelegate:".as_ptr()),
-                    std::ptr::null_mut(),
-                );
-            }
-            let ca_layer_cls = objc_getClass(c"CALayer".as_ptr());
-            if !ca_layer_cls.is_null() {
-                let empty_layer = msg0(ca_layer_cls, sel_registerName(c"layer".as_ptr()));
-                msg1_ptr(
-                    content_view,
-                    sel_registerName(c"setLayer:".as_ptr()),
-                    empty_layer,
-                );
+                let sel_remove_bb = sel_registerName(c"removeBackBuffers".as_ptr());
+                if msg1_bool_ret(
+                    layer,
+                    sel_registerName(c"respondsToSelector:".as_ptr()),
+                    sel_remove_bb,
+                ) {
+                    msg0_void(layer, sel_remove_bb);
+                }
+                let sel_discard = sel_registerName(c"discardContents".as_ptr());
+                if msg1_bool_ret(
+                    layer,
+                    sel_registerName(c"respondsToSelector:".as_ptr()),
+                    sel_discard,
+                ) {
+                    msg0_void(layer, sel_discard);
+                }
             }
         }
     }
