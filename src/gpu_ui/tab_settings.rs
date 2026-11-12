@@ -715,6 +715,118 @@ impl DashboardState {
             );
             thin_divider(ui);
 
+            // Screenshot Save Folder Setting Row
+            setting_row_split(
+                ui,
+                |ui| {
+                    ui.horizontal(|ui| {
+                        if secondary_button(ui, "Desktop").clicked() {
+                            self.input_cfg.screenshot_save_directory = "~/Desktop".to_string();
+                            *feat_changed = true;
+                        }
+                        if secondary_button(ui, "Downloads").clicked() {
+                            self.input_cfg.screenshot_save_directory = "~/Downloads".to_string();
+                            *feat_changed = true;
+                        }
+                        if secondary_button(ui, "Pictures").clicked() {
+                            self.input_cfg.screenshot_save_directory =
+                                "~/Pictures/Screenshots".to_string();
+                            *feat_changed = true;
+                        }
+                        if secondary_button(ui, tr("📁 Chọn thư mục...", "📁 Browse...")).clicked()
+                        {
+                            if let Some(folder) = core_input::pick_folder_dialog(Some(
+                                &self.input_cfg.screenshot_save_directory,
+                            )) {
+                                self.input_cfg.screenshot_save_directory = folder;
+                                *feat_changed = true;
+                            }
+                        }
+                    });
+                },
+                |ui| {
+                    label_with_tip(
+                        ui,
+                        RichText::new(tr(
+                            "Screenshot Save Folder",
+                            "Thư mục Lưu Ảnh chụp màn hình",
+                        ))
+                        .size(12.5)
+                        .strong(),
+                        tr(
+                            "Thư mục lưu file ảnh chụp màn hình khi bấm nút Lưu PNG hoặc phím tắt Cmd+S.",
+                            "Directory where screenshot PNG files are saved when clicking Save PNG or pressing Cmd+S.",
+                        ),
+                    );
+                },
+            );
+
+            // Visible Path Bar displaying the current folder path
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                let p = palette();
+                let resolved = core_clipboard::resolve_save_dir(Some(&self.input_cfg.screenshot_save_directory));
+
+                ui.label(
+                    RichText::new(tr("Đường dẫn:", "Path:"))
+                        .size(11.5)
+                        .color(p.text_secondary),
+                );
+
+                let edit_resp = ui.add(
+                    egui::TextEdit::singleline(&mut self.input_cfg.screenshot_save_directory)
+                        .desired_width(ui.available_width() - 145.0)
+                        .font(egui::TextStyle::Monospace),
+                );
+                if edit_resp.changed() {
+                    *feat_changed = true;
+                }
+
+                if secondary_button(ui, tr("↗ Mở", "↗ Open"))
+                    .on_hover_text(tr("Mở thư mục này trong Finder", "Open this folder in Finder"))
+                    .clicked()
+                {
+                    let _ = std::process::Command::new("open")
+                        .arg(&resolved)
+                        .spawn();
+                }
+                if secondary_button(ui, tr("📋 Copy", "📋 Copy"))
+                    .on_hover_text(tr("Sao chép đường dẫn này", "Copy this folder path"))
+                    .clicked()
+                {
+                    let _ = core_clipboard::copy_text_to_clipboard(&resolved.to_string_lossy());
+                }
+            });
+            ui.add_space(2.0);
+            thin_divider(ui);
+
+            // Screenshot Ask Where To Save Setting Row
+            setting_row_split(
+                ui,
+                |ui| {
+                    if toggle_switch(ui, &mut self.input_cfg.screenshot_ask_where_to_save).changed()
+                    {
+                        *feat_changed = true;
+                    }
+                },
+                |ui| {
+                    label_with_tip(
+                        ui,
+                        RichText::new(tr(
+                            "Ask Where to Save Each Time",
+                            "Hỏi vị trí lưu mỗi lần chụp",
+                        ))
+                        .size(12.5)
+                        .strong(),
+                        tr(
+                            "When enabled, a native Save Dialog opens after capturing to choose folder and filename. When disabled, saves immediately without prompts.",
+                            "Khi bật, hộp thoại Lưu file sẽ hiện sau khi chụp để chọn thư mục và đặt tên. Khi tắt, ảnh sẽ lưu tự động ngay lập tức.",
+                        ),
+                    );
+                },
+            );
+            thin_divider(ui);
+
             // 5. Clipboard Drawer
             setting_row_split(
                 ui,
@@ -754,69 +866,6 @@ impl DashboardState {
                         tr(
                             "Slide-out left drawer with instant search, pinned items, and click-to-paste.",
                             "Ngăn kéo trượt bên trái màn hình giúp tìm kiếm và dán nhanh văn bản/hình ảnh đã copy.",
-                        ),
-                    );
-                },
-            );
-            thin_divider(ui);
-
-            // 6. Alt-Tab Live Preview
-            setting_row_split(
-                ui,
-                |ui| {
-                    if toggle_switch(ui, &mut self.input_cfg.replace_macos_cmd_tab).changed() {
-                        *feat_changed = true;
-                    }
-                    let is_rec = matches!(
-                        &self.recording_shortcut,
-                        Some(ShortcutRecordTarget::ConfigField(f)) if f == "alt_tab_shortcut"
-                    );
-                    if shortcut_recorder_button(ui, &self.input_cfg.alt_tab_shortcut, is_rec)
-                        .clicked()
-                    {
-                        self.recording_shortcut = Some(ShortcutRecordTarget::ConfigField(
-                            "alt_tab_shortcut".to_string(),
-                        ));
-                    }
-                },
-                |ui| {
-                    label_with_tip(
-                        ui,
-                        RichText::new(tr(
-                            "Alt-Tab Window Switcher (Thumbnails)",
-                            "Alt-Tab (Chuyển cửa sổ kèm ảnh thu nhỏ)",
-                        ))
-                        .size(12.5)
-                        .strong(),
-                        tr(
-                            "Replaces Cmd+Tab / Option+Tab with a visual window switcher showing live window previews.",
-                            "Thay thế Cmd+Tab mặc định bằng bộ chuyển đổi từng cửa sổ độc lập có hình thu nhỏ trực quan.",
-                        ),
-                    );
-                },
-            );
-            thin_divider(ui);
-
-            // 7. Finder Cmd+X -> Cmd+V Cut & Paste
-            setting_row_split(
-                ui,
-                |ui| {
-                    if toggle_switch(ui, &mut self.input_cfg.finder_cut_paste_enabled).changed() {
-                        *feat_changed = true;
-                    }
-                },
-                |ui| {
-                    label_with_tip(
-                        ui,
-                        RichText::new(tr(
-                            "Finder File Cut & Paste (Cmd+X → Cmd+V)",
-                            "Cắt & Dán File trong Finder (Cmd+X → Cmd+V)",
-                        ))
-                        .size(12.5)
-                        .strong(),
-                        tr(
-                            "Press Cmd+X on files in Finder, then Cmd+V in destination folder to move them (automatically translates to Cmd+Option+V).",
-                            "Nhấn Cmd+X trên tệp trong Finder rồi nhấn Cmd+V ở thư mục đích để di chuyển tệp tự nhiên như Windows.",
                         ),
                     );
                 },

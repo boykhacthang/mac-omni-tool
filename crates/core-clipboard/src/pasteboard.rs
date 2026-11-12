@@ -157,38 +157,112 @@ pub fn copy_png_bytes_to_clipboard(png_bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-/// Prompt the user via native macOS Save Dialog and save PNG screenshot to disk.
-pub fn save_png_bytes_to_file(png_bytes: &[u8]) -> Result<Option<String>, String> {
+/// Resolve a directory string that may start with `~` or be relative.
+/// Defaults to `~/Desktop` if path is invalid or empty.
+pub fn resolve_save_dir(custom_dir: Option<&str>) -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    if let Some(dir) = custom_dir {
+        let trimmed = dir.trim();
+        if !trimmed.is_empty() {
+            let p = if trimmed == "~" {
+                std::path::PathBuf::from(&home)
+            } else if let Some(stripped) = trimmed.strip_prefix("~/") {
+                std::path::PathBuf::from(&home).join(stripped)
+            } else {
+                std::path::PathBuf::from(trimmed)
+            };
+            let _ = std::fs::create_dir_all(&p);
+            if p.is_dir() {
+                return p;
+            }
+        }
+    }
+    let desktop = std::path::PathBuf::from(&home).join("Desktop");
+    if desktop.is_dir() {
+        desktop
+    } else {
+        std::path::PathBuf::from(&home)
+    }
+}
+
+/// Save PNG screenshot to disk (either to a configured directory or prompting via AppleScript dialog).
+/// If `ask_where` is true: prompts the user via a native macOS Save Dialog (must be called in a background thread!).
+/// If `ask_where` is false: saves immediately with timestamp to `custom_dir` (defaulting to ~/Desktop).
+pub fn save_png_bytes_to_file(
+    png_bytes: &[u8],
+    custom_dir: Option<&str>,
+    ask_where: bool,
+) -> Result<Option<String>, String> {
     if png_bytes.is_empty() {
         return Err("Dữ liệu ảnh rỗng".to_string());
     }
 
-    let ts = now_unix_ms() / 1000;
-    let default_name = format!("Screenshot_{}.png", ts);
-    let script = format!(
-        "POSIX path of (choose file name with prompt \"Lưu ảnh chụp màn hình (.png):\" default name \"{}\" default location (path to desktop folder))",
-        default_name
+    let target_dir = resolve_save_dir(custom_dir);
+
+    let now_sec = (now_unix_ms() / 1000) as libc::time_t;
+    let default_filename = unsafe {
+        let mut tm: libc::tm = std::mem::zeroed();
+        libc::localtime_r(&now_sec, &mut tm);
+        format!(
+            "Screenshot_{:04}-{:02}-{:02}_{:02}-{:02}-{:02}.png",
+            tm.tm_year + 1900,
+            tm.tm_mon + 1,
+            tm.tm_mday,
+            tm.tm_hour,
+            tm.tm_min,
+            tm.tm_sec,
+        )
+    };
+
+    let target_path = if ask_where {
+        let script = format!(
+            "POSIX path of (choose file name with prompt \"Lưu ảnh chụp màn hình (.png):\" default name \"{}\" default location (POSIX file \"{}\"))",
+            default_filename,
+            target_dir.display()
+        );
+        let out = std::process::Command::new("osascript")
+            .args(["-e", &script])
+            .output()
+            .map_err(|e| format!("Không thể mở hộp thoại lưu: {}", e))?;
+        if !out.status.success() {
+            return Ok(None);
+        }
+        let mut chosen = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if chosen.is_empty() {
+            return Ok(None);
+        }
+        if !chosen.to_lowercase().ends_with(".png") {
+            chosen.push_str(".png");
+        }
+        std::path::PathBuf::from(chosen)
+    } else {
+        target_dir.join(&default_filename)
+    };
+
+    fs::write(&target_path, png_bytes)
+        .map_err(|e| format!("Lỗi ghi file '{}': {}", target_path.display(), e))?;
+
+    // Also ensure it is copied to NSPasteboard so user can paste it anywhere
+    let _ = copy_png_bytes_to_clipboard(png_bytes);
+
+    // Asynchronously post macOS notification banner without blocking
+    let filename_disp = target_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "ảnh chụp".to_string());
+    let parent_disp = target_path
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let notif_script = format!(
+        "display notification \"Đã lưu vào: {}\" with title \"{}\" sound name \"Hero\"",
+        parent_disp, filename_disp
     );
+    let _ = std::process::Command::new("osascript")
+        .args(["-e", &notif_script])
+        .spawn();
 
-    let out = std::process::Command::new("osascript")
-        .args(["-e", &script])
-        .output()
-        .map_err(|e| format!("Không thể mở hộp thoại lưu file: {}", e))?;
-
-    if !out.status.success() {
-        return Ok(None);
-    }
-
-    let mut chosen = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if chosen.is_empty() {
-        return Ok(None);
-    }
-    if !chosen.to_lowercase().ends_with(".png") {
-        chosen.push_str(".png");
-    }
-
-    fs::write(&chosen, png_bytes).map_err(|e| format!("Lỗi ghi file '{}': {}", chosen, e))?;
-    Ok(Some(chosen))
+    Ok(Some(target_path.to_string_lossy().to_string()))
 }
 
 /// Copy a saved clipboard item back to macOS `generalPasteboard` and optionally simulate `Cmd+V`.

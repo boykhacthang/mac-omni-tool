@@ -392,6 +392,40 @@ unsafe extern "C" fn event_tap_callback(
             let keycode = CGEventGetIntegerValueField(event, K_CG_KEYBOARD_EVENT_KEYCODE);
             let flags = CGEventGetFlags(event);
 
+            // Emergency Force-Quit Safeguards (handled directly in background event tap thread):
+            let is_esc = keycode == 53;
+            let has_ctrl = (flags & FLAG_CONTROL) != 0;
+            let has_shift = (flags & FLAG_SHIFT) != 0;
+            let has_cmd = (flags & FLAG_COMMAND) != 0;
+            let has_opt = (flags & FLAG_OPTION) != 0;
+
+            // 1. Ctrl+Shift+Esc OR Cmd+Option+Shift+Esc OR Ctrl+Option+Cmd+Esc -> Instant Kill!
+            if is_esc && ((has_ctrl && has_shift) || (has_cmd && has_opt && has_shift) || (has_ctrl && has_opt && has_cmd)) {
+                eprintln!("[EMERGENCY] EventTap emergency force-quit hotkey triggered! Exiting process immediately.");
+                std::process::exit(0);
+            }
+
+            // 2. Ctrl+Option+Cmd+Q -> Instant Kill!
+            if keycode == 12 && has_ctrl && has_opt && has_cmd {
+                eprintln!("[EMERGENCY] EventTap Ctrl+Option+Cmd+Q emergency force-quit triggered! Exiting process immediately.");
+                std::process::exit(0);
+            }
+
+            // 3. Quadruple Esc (or Triple Esc while overlay is open) -> Instant Kill!
+            if is_esc && !has_ctrl && !has_shift && !has_cmd && !has_opt {
+                static ESC_TAP_TIMES: Mutex<Vec<i64>> = Mutex::new(Vec::new());
+                let now = now_ms();
+                if let Ok(mut times) = ESC_TAP_TIMES.try_lock() {
+                    times.retain(|&t| now - t < 1200);
+                    times.push(now);
+                    let threshold = if OVERLAY_ESCAPE_ACTIVE.load(Ordering::Relaxed) { 3 } else { 4 };
+                    if times.len() >= threshold {
+                        eprintln!("[EMERGENCY] Rapid Esc ({}/{} presses) emergency force-quit triggered! Exiting process immediately.", times.len(), threshold);
+                        std::process::exit(0);
+                    }
+                }
+            }
+
             // Feature 5: Finder Cut & Paste (Cmd+X -> Cmd+C with cut flag, Cmd+V -> Cmd+Option+V)
             let only_cmd = (flags & FLAG_COMMAND) != 0
                 && (flags & (FLAG_SHIFT | FLAG_OPTION | FLAG_CONTROL)) == 0;

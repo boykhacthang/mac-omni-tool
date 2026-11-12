@@ -179,8 +179,11 @@ impl ScreenshotSlotUi {
         // Keyboard shortcuts: Escape to close, Enter / Cmd+C to copy, Cmd+Z to undo
         let mut trigger_copy = false;
         let mut trigger_save = false;
+        let mut trigger_save_as = false;
         ctx.input(|i| {
-            if i.key_pressed(Key::Escape) {
+            if i.key_pressed(Key::Escape)
+                || (i.modifiers.command && (i.key_pressed(Key::W) || i.key_pressed(Key::Q)))
+            {
                 if self.text_input_pos.is_some() {
                     self.text_input_pos = None;
                     self.text_input_buf.clear();
@@ -191,6 +194,8 @@ impl ScreenshotSlotUi {
                 trigger_copy = true;
             } else if i.modifiers.command && i.key_pressed(Key::C) && self.selection.is_some() {
                 trigger_copy = true;
+            } else if i.modifiers.command && i.modifiers.shift && i.key_pressed(Key::S) && self.selection.is_some() {
+                trigger_save_as = true;
             } else if i.modifiers.command && i.key_pressed(Key::S) && self.selection.is_some() {
                 trigger_save = true;
             } else if i.modifiers.command && i.key_pressed(Key::Z) {
@@ -199,11 +204,15 @@ impl ScreenshotSlotUi {
         });
 
         if trigger_copy {
-            self.export_and_finish(true, proxy);
+            self.export_and_finish(true, false, proxy);
+            return;
+        }
+        if trigger_save_as {
+            self.export_and_finish(false, true, proxy);
             return;
         }
         if trigger_save {
-            self.export_and_finish(false, proxy);
+            self.export_and_finish(false, false, proxy);
             return;
         }
 
@@ -456,6 +465,7 @@ impl ScreenshotSlotUi {
                 let was_hidden = self.last_toolbar_rect.is_none();
                 let mut do_copy = false;
                 let mut do_save = false;
+                let mut do_save_as = false;
                 let mut do_cancel = false;
 
                 let area_resp = egui::Area::new(egui::Id::new(("screenshot_toolbar", self.slot_idx)))
@@ -539,13 +549,48 @@ impl ScreenshotSlotUi {
                                     ui.separator();
 
                                     // Save PNG, Copy, Cancel
-                                    if secondary_button(ui, tr("💾 Save", "💾 Lưu PNG")).clicked() {
-                                        do_save = true;
+                                    let alt_held = ctx.input(|i| i.modifiers.alt);
+                                    let cfg = core_input::get_input_config();
+                                    let save_tip = if cfg.screenshot_ask_where_to_save {
+                                        tr(
+                                            "Lưu ảnh PNG (Cmd+S) • Mở hộp thoại chọn vị trí lưu và đặt tên",
+                                            "Save PNG (Cmd+S) • Open dialog to choose location and name",
+                                        )
+                                        .to_string()
+                                    } else {
+                                        format!(
+                                            "{} {} (Cmd+S) • {}",
+                                            tr("Lưu vào", "Save to"),
+                                            cfg.screenshot_save_directory,
+                                            tr("Giữ Option hoặc Cmd+Shift+S để chọn vị trí", "Hold Option or Cmd+Shift+S to choose folder"),
+                                        )
+                                    };
+                                    if secondary_button(ui, tr("💾 Save", "💾 Lưu PNG"))
+                                        .on_hover_text(save_tip)
+                                        .clicked()
+                                    {
+                                        if alt_held {
+                                            do_save_as = true;
+                                        } else {
+                                            do_save = true;
+                                        }
                                     }
-                                    if primary_button(ui, tr("📋 Copy ↵", "📋 Copy ↵")).clicked() {
+                                    if primary_button(ui, tr("📋 Copy ↵", "📋 Copy ↵"))
+                                        .on_hover_text(tr(
+                                            "Copy vào Clipboard và đóng overlay (Enter / Cmd+C)",
+                                            "Copy to Clipboard and close overlay (Enter / Cmd+C)",
+                                        ))
+                                        .clicked()
+                                    {
                                         do_copy = true;
                                     }
-                                    if danger_button(ui, "✕ Esc").clicked() {
+                                    if danger_button(ui, "✕ Esc")
+                                        .on_hover_text(tr(
+                                            "Đóng (Esc / Cmd+W) • Nhấn Esc 3 lần hoặc Ctrl+Shift+Esc để tắt app khẩn cấp",
+                                            "Close (Esc / Cmd+W) • Press Esc 3 times or Ctrl+Shift+Esc for emergency quit",
+                                        ))
+                                        .clicked()
+                                    {
                                         do_cancel = true;
                                     }
                                 });
@@ -565,9 +610,11 @@ impl ScreenshotSlotUi {
                 }
 
                 if do_copy {
-                    self.export_and_finish(true, proxy);
+                    self.export_and_finish(true, false, proxy);
+                } else if do_save_as {
+                    self.export_and_finish(false, true, proxy);
                 } else if do_save {
-                    self.export_and_finish(false, proxy);
+                    self.export_and_finish(false, false, proxy);
                 } else if do_cancel {
                     let _ = proxy.send_event(AppUserEvent::HideScreenshotOverlay);
                 }
@@ -945,7 +992,12 @@ impl ScreenshotSlotUi {
         }
     }
 
-    fn export_and_finish(&mut self, copy_to_clipboard: bool, proxy: &EventLoopProxy<AppUserEvent>) {
+    fn export_and_finish(
+        &mut self,
+        copy_to_clipboard: bool,
+        ask_where_dialog: bool,
+        proxy: &EventLoopProxy<AppUserEvent>,
+    ) {
         let Some(sel) = self.selection else {
             let _ = proxy.send_event(AppUserEvent::HideScreenshotOverlay);
             return;
@@ -964,16 +1016,25 @@ impl ScreenshotSlotUi {
             self.rasterize_cropped_png(sel)
         };
 
-        if let Some(bytes) = png_bytes {
-            if copy_to_clipboard {
-                let _ = core_clipboard::copy_png_bytes_to_clipboard(&bytes);
-            } else {
-                let _ = core_clipboard::save_png_bytes_to_file(&bytes);
-            }
-        }
-
+        // CRITICAL: Dismiss the overlay IMMEDIATELY so the display is completely unlocked and responsive!
         self.clear_selection();
         let _ = proxy.send_event(AppUserEvent::HideScreenshotOverlay);
+
+        if let Some(bytes) = png_bytes {
+            std::thread::spawn(move || {
+                if copy_to_clipboard {
+                    let _ = core_clipboard::copy_png_bytes_to_clipboard(&bytes);
+                } else {
+                    let cfg = core_input::get_input_config();
+                    let ask = ask_where_dialog || cfg.screenshot_ask_where_to_save;
+                    let _ = core_clipboard::save_png_bytes_to_file(
+                        &bytes,
+                        Some(&cfg.screenshot_save_directory),
+                        ask,
+                    );
+                }
+            });
+        }
     }
 
     /// Crop `self.raw_rgba` to `sel` at Retina pixel resolution, rasterize all annotations onto it,

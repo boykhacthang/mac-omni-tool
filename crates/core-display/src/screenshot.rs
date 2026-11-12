@@ -262,3 +262,16 @@ pub fn capture_all_displays_png() -> Result<Vec<(DisplayInfo, Vec<u8>)>, String>
     Ok(out)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_capture_display_rgba8_twice() {
+        let r1 = capture_all_displays_rgba8();
+        println!("r1: {:?}", r1.as_ref().map(|v| v.len()));
+        let r2 = capture_all_displays_rgba8();
+        println!("r2: {:?}", r2.as_ref().map(|v| v.len()));
+    }
+}
+

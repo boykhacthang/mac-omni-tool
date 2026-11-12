@@ -403,3 +403,42 @@ pub fn pick_application_bundle_dialog() -> Option<RunningAppItem> {
     let clean_path = raw_path.trim_end_matches('/');
     read_app_bundle_info(std::path::Path::new(clean_path))
 }
+
+/// Open native macOS folder chooser dialog to select a directory (e.g. for screenshot save folder).
+pub fn pick_folder_dialog(default_location: Option<&str>) -> Option<String> {
+    let loc_clause = if let Some(loc) = default_location {
+        let trimmed = loc.trim();
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let full = if trimmed == "~" {
+            home
+        } else if let Some(stripped) = trimmed.strip_prefix("~/") {
+            format!("{}/{}", home, stripped)
+        } else {
+            trimmed.to_string()
+        };
+        if std::path::Path::new(&full).is_dir() {
+            format!(" default location (POSIX file \"{}\")", full)
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+    let script = format!(
+        "POSIX path of (choose folder with prompt \"Chọn thư mục lưu ảnh chụp màn hình:\"{})",
+        loc_clause
+    );
+    let out = std::process::Command::new("osascript")
+        .args(["-e", &script])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if raw.is_empty() {
+        None
+    } else {
+        Some(raw.trim_end_matches('/').to_string())
+    }
+}

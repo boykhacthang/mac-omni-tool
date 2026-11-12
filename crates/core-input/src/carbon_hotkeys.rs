@@ -21,7 +21,12 @@ static WINDOW_TILING_HOTKEY_REFS: OnceLock<Mutex<Vec<(usize, String)>>> = OnceLo
 static FEATURE_HOTKEY_REFS: OnceLock<Mutex<Vec<usize>>> = OnceLock::new();
 
 unsafe fn primary_carbon_target() -> *mut c_void {
-    GetApplicationEventTarget()
+    let disp = GetEventDispatcherTarget();
+    if !disp.is_null() {
+        disp
+    } else {
+        GetApplicationEventTarget()
+    }
 }
 
 fn window_tiling_refs() -> &'static Mutex<Vec<(usize, String)>> {
@@ -126,6 +131,11 @@ pub fn sync_feature_carbon_hotkeys() {
         // Permanent Emergency Unfreeze Hotkeys (Option+Esc = 98, Ctrl+Esc = 97) always active at OS Carbon level
         register_if_active(98, true, "Option+Escape");
         register_if_active(97, true, "Ctrl+Escape");
+
+        // Permanent Emergency Force-Quit Hotkeys (Ctrl+Shift+Esc = 999, Ctrl+Option+Cmd+Q = 998, Cmd+Option+Shift+Esc = 997)
+        register_if_active(999, true, "Ctrl+Shift+Escape");
+        register_if_active(998, true, "Ctrl+Option+Cmd+Q");
+        register_if_active(997, true, "Cmd+Option+Shift+Escape");
     }
 }
 
@@ -304,6 +314,10 @@ unsafe extern "C" fn carbon_hotkey_handler(
             97..=99 => {
                 crate::event_tap::reset_all_tap_held_states();
                 notify_overlay_immediate(UiOverlayEvent::HideAllOverlays);
+            }
+            997..=999 => {
+                eprintln!("[EMERGENCY] Global emergency force-quit hotkey triggered! Exiting process immediately.");
+                std::process::exit(0);
             }
             id if (100..150).contains(&id) => {
                 if cfg.window_snapping_enabled && core_window::is_accessibility_trusted() {

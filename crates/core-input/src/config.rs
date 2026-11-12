@@ -46,8 +46,10 @@ pub struct InputAutomationConfig {
     #[serde(default = "default_true")]
     pub window_snapping_enabled: bool,
     /// Bật/tắt Cmd+X và Cmd+V để cắt & dán tệp trong Finder
+    #[serde(default)]
     pub finder_cut_paste_enabled: bool,
     /// Trạng thái hiện tại của bộ nhớ đệm cắt tệp Finder
+    #[serde(default)]
     pub finder_cut_active: bool,
     /// Bật/tắt ấn Chuột Trái + Chuột Phải cùng lúc
     pub mouse_chord_enabled: bool,
@@ -64,7 +66,7 @@ pub struct InputAutomationConfig {
     /// Phím tắt bật cửa sổ Alt-Tab Live Preview
     pub alt_tab_shortcut: String,
     /// Thay thế Cmd+Tab bằng Live Preview độc lập
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub replace_macos_cmd_tab: bool,
     /// Bật/tắt tổng tính năng chụp màn hình (mặc định: Bật)
     #[serde(default = "default_true")]
@@ -93,6 +95,12 @@ pub struct InputAutomationConfig {
     /// ID màn hình được chọn khi chụp toàn màn hình (0 = theo con trỏ chuột)
     #[serde(default)]
     pub screenshot_display_id: u32,
+    /// Thư mục lưu ảnh chụp màn hình (mặc định: "~/Desktop")
+    #[serde(default = "default_screenshot_save_directory")]
+    pub screenshot_save_directory: String,
+    /// Hỏi vị trí lưu và tên file mỗi lần chụp thay vì tự động lưu
+    #[serde(default)]
+    pub screenshot_ask_where_to_save: bool,
 
     // -------------------------------------------------------------------------
     // External Mouse Customization, Smooth Scrolling (120Hz) & Per-App Profiles
@@ -270,12 +278,16 @@ fn default_screenshot_mode() -> String {
     "region".to_string()
 }
 
+fn default_screenshot_save_directory() -> String {
+    "~/Desktop".to_string()
+}
+
 impl Default for InputAutomationConfig {
     fn default() -> Self {
         Self {
             clipboard_enabled: true,
             window_snapping_enabled: true,
-            finder_cut_paste_enabled: true,
+            finder_cut_paste_enabled: false,
             finder_cut_active: false,
             mouse_chord_enabled: true,
             mouse_chord_action: "mission_control".to_string(),
@@ -284,7 +296,7 @@ impl Default for InputAutomationConfig {
             show_desktop_shortcut: "F11".to_string(),
             clipboard_popup_shortcut: "Cmd+Shift+V".to_string(),
             alt_tab_shortcut: "Cmd+Tab".to_string(),
-            replace_macos_cmd_tab: true,
+            replace_macos_cmd_tab: false,
             screenshot_enabled: true,
             screenshot_region_enabled: true,
             screenshot_shortcut: default_screenshot_shortcut(),
@@ -294,6 +306,8 @@ impl Default for InputAutomationConfig {
             screenshot_fullscreen_copy_shortcut: default_screenshot_fullscreen_copy_shortcut(),
             screenshot_mode: default_screenshot_mode(),
             screenshot_display_id: 0,
+            screenshot_save_directory: default_screenshot_save_directory(),
+            screenshot_ask_where_to_save: false,
             external_mouse_enabled: true,
             smooth_scroll_enabled: true,
             scroll_step_px: default_scroll_step_px(),
@@ -489,6 +503,10 @@ fn normalize_config(cfg: &mut InputAutomationConfig) {
     } else {
         canon_alt
     };
+
+    if cfg.screenshot_save_directory.trim().is_empty() {
+        cfg.screenshot_save_directory = default_screenshot_save_directory();
+    }
 
     cfg.scroll_step_px = cfg.scroll_step_px.clamp(15, 120);
     cfg.scroll_duration_ms = cfg.scroll_duration_ms.clamp(80, 600);

@@ -40,6 +40,8 @@ use egui_winit::winit::{
 };
 use std::sync::Arc;
 
+static LAST_MAIN_HEARTBEAT_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
 struct OmniGpuApp {
     start_minimized: bool,
     proxy: EventLoopProxy<AppUserEvent>,
@@ -347,6 +349,7 @@ impl OmniGpuApp {
                 surf.suspend_surface(&self.gpu);
             }
         }
+        self.screenshot_surfaces.clear();
         self.screenshot_ui.clear_all();
         if any_vis {
             if let Some(main) = &self.main_surface {
@@ -434,15 +437,11 @@ impl OmniGpuApp {
 impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         event_loop.set_control_flow(ControlFlow::Wait);
-        let first_init = self.main_surface.is_none();
         self.ensure_windows_initialized(event_loop);
-        if !first_init {
-            // Reopen from Dock / Spotlight when already running
-            self.show_main_dashboard();
-        }
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, user_ev: AppUserEvent) {
+        LAST_MAIN_HEARTBEAT_MS.store(core_input::now_ms(), std::sync::atomic::Ordering::Relaxed);
         event_loop.set_control_flow(ControlFlow::Wait);
         self.ensure_windows_initialized(event_loop);
 
@@ -942,6 +941,7 @@ impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
                 }
             }
             AppUserEvent::ScreenshotCaptureFailed => {
+                eprintln!("[screenshot] ScreenshotCaptureFailed triggered!");
                 self.hide_mini_popover();
                 self.dashboard_ui.switch_tab(DashboardTab::Settings);
                 self.dashboard_ui.show_toast(tr(
@@ -1024,6 +1024,7 @@ impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
         window_id: WindowId,
         event: WindowEvent,
     ) {
+        LAST_MAIN_HEARTBEAT_MS.store(core_input::now_ms(), std::sync::atomic::Ordering::Relaxed);
         event_loop.set_control_flow(ControlFlow::Wait);
 
         let main_id = self.main_surface.as_ref().map(|s| s.window.id());
@@ -1214,6 +1215,7 @@ impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        LAST_MAIN_HEARTBEAT_MS.store(core_input::now_ms(), std::sync::atomic::Ordering::Relaxed);
         if let Some(deadline) = self.next_repaint_deadline {
             if std::time::Instant::now() >= deadline {
                 self.next_repaint_deadline = None;
@@ -1223,7 +1225,17 @@ impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
                 event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
             }
         } else {
-            event_loop.set_control_flow(ControlFlow::Wait);
+            let overlay_active = {
+                let sess = screenshot_session().lock().unwrap();
+                sess.revealed || sess.capturing
+            };
+            if overlay_active {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(
+                    std::time::Instant::now() + std::time::Duration::from_millis(500),
+                ));
+            } else {
+                event_loop.set_control_flow(ControlFlow::Wait);
+            }
         }
     }
 }
@@ -1236,6 +1248,31 @@ fn main() {
     unsafe {
         disable_macos_window_restoration();
     }
+
+    // Spawn emergency overlay safety watchdog:
+    // If screenshot overlay is visible and the main thread stays unresponsive for > 4.5s,
+    // force-terminate process immediately to guarantee Mac screen is never locked!
+    std::thread::Builder::new()
+        .name("overlay-watchdog".to_string())
+        .spawn(|| loop {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let overlay_active = {
+                let sess = screenshot_session().lock().unwrap();
+                sess.revealed || sess.capturing
+            };
+            if overlay_active {
+                let last = LAST_MAIN_HEARTBEAT_MS.load(std::sync::atomic::Ordering::Relaxed);
+                let now = core_input::now_ms();
+                if last > 0 && (now - last) > 4500 {
+                    eprintln!(
+                        "[EMERGENCY WATCHDOG] Main thread hung for {}ms during overlay! Force quitting process to free screen.",
+                        now - last
+                    );
+                    std::process::exit(1);
+                }
+            }
+        })
+        .expect("Failed to spawn overlay watchdog");
 
     // 1. Sync clipboard enabled state & start the 250ms zero-leak NSPasteboard clipboard watcher thread
     let initial_cfg = core_input::get_input_config();

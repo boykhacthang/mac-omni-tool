@@ -904,21 +904,6 @@ pub unsafe fn reveal_screenshot_window(window: &Window, make_key: bool) {
 
     let ns_win = get_ns_window(window);
     if !ns_win.is_null() {
-        let ns_app_cls = objc_getClass(c"NSApplication".as_ptr());
-        if !ns_app_cls.is_null() {
-            let ns_app = msg0(ns_app_cls, sel_registerName(c"sharedApplication".as_ptr()));
-            if !ns_app.is_null() {
-                let _ = msg0(ns_app, sel_registerName(c"unhideWithoutActivation".as_ptr()));
-                if make_key {
-                    msg1_bool(
-                        ns_app,
-                        sel_registerName(c"activateIgnoringOtherApps:".as_ptr()),
-                        true,
-                    );
-                }
-            }
-        }
-
         promote_to_nonactivating_overlay_panel(ns_win);
         msg1_bool(
             ns_win,

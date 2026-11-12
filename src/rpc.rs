@@ -833,7 +833,12 @@ pub fn handle_api_request(body: &[u8], proxy: &EventLoopProxy<AppUserEvent>) -> 
                 Ok(bytes) => {
                     std::thread::spawn(move || {
                         std::thread::sleep(std::time::Duration::from_millis(75));
-                        let _ = core_clipboard::save_png_bytes_to_file(&bytes);
+                        let cfg = core_input::get_input_config();
+                        let _ = core_clipboard::save_png_bytes_to_file(
+                            &bytes,
+                            Some(&cfg.screenshot_save_directory),
+                            cfg.screenshot_ask_where_to_save,
+                        );
                     });
                     json!({ "ok": true, "saved": true })
                 }

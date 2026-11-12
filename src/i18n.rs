@@ -165,7 +165,6 @@ pub const MOUSE_ACTION_OPTIONS: &[&str] = &[
     "screenshot_full_edit",
     "screenshot_full_copy",
     "clipboard_popup",
-    "alt_tab",
     "open_dashboard",
     "disabled",
 ];
@@ -246,7 +245,6 @@ pub const CHORD_ACTION_OPTIONS: &[&str] = &[
     "show_desktop",
     "launchpad",
     "clipboard_popup",
-    "alt_tab",
     "screenshot",
 ];
 

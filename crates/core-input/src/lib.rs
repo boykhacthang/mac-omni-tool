@@ -11,7 +11,8 @@ pub mod smooth_scroll;
 pub mod spaces;
 
 pub use actions::{
-    is_finder_frontmost, post_synthetic_key_combo, register_overlay_callback, trigger_system_action,
+    is_finder_frontmost, now_ms, post_synthetic_key_combo, register_overlay_callback,
+    trigger_system_action,
 };
 pub use carbon_hotkeys::{
     register_native_carbon_hotkeys, set_overlay_escape_hotkey_active, sync_feature_carbon_hotkeys,
@@ -25,8 +26,8 @@ pub use config::{
 pub use event_tap::{notify_permissions_changed, start_global_input_tap, sync_event_tap_enabled};
 pub use spaces::{
     frontmost_app_info, get_spaces_status, list_installed_gui_apps, list_running_gui_apps,
-    pick_application_bundle_dialog, query_macos_spaces_counts, read_app_bundle_info,
-    RunningAppItem, SpacesStatus,
+    pick_application_bundle_dialog, pick_folder_dialog, query_macos_spaces_counts,
+    read_app_bundle_info, RunningAppItem, SpacesStatus,
 };
 
 #[cfg(test)]

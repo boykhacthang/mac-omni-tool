@@ -14,7 +14,7 @@ pub(crate) static OVERLAY_CALLBACK: OnceLock<
 > = OnceLock::new();
 static LAST_OVERLAY_EVENT_MS: AtomicI64 = AtomicI64::new(0);
 
-pub(crate) fn now_ms() -> i64 {
+pub fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()

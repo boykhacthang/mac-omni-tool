@@ -49,6 +49,16 @@ mod tests {
     }
 
     #[test]
+    fn test_capture_twice() {
+        let r1 = capture_all_displays_rgba8();
+        println!("r1: {:?}", r1.as_ref().map(|v| v.len()));
+        let r2 = capture_all_displays_rgba8();
+        println!("r2: {:?}", r2.as_ref().map(|v| v.len()));
+        let r3 = capture_all_displays_rgba8();
+        println!("r3: {:?}", r3.as_ref().map(|v| v.len()));
+    }
+
+    #[test]
     fn test_classify_audio_device_types() {
         let (label, icon) = classify_audio_device("Thang's AirPods Pro", u32::from_be_bytes(*b"blut"));
         assert_eq!(label, "AirPods");

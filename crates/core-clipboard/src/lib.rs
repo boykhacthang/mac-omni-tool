@@ -11,7 +11,7 @@ pub use codec::{base64_encode, decode_base64_png, fnv1a_hash, now_unix_ms};
 pub use models::{ClipboardItem, ClipboardPageResult, ClipboardStats, MAX_CLIPBOARD_ITEMS};
 pub use pasteboard::{
     activate_clipboard_item, copy_png_bytes_to_clipboard, copy_text_to_clipboard,
-    poll_pasteboard_once, save_png_bytes_to_file, start_clipboard_watcher,
+    poll_pasteboard_once, resolve_save_dir, save_png_bytes_to_file, start_clipboard_watcher,
 };
 pub use storage::{
     app_data_dir, clear_unpinned_clipboard_items, db_path, delete_clipboard_item,
@@ -46,6 +46,17 @@ mod tests {
     fn test_decode_base64_invalid_errors() {
         assert!(decode_base64_png("").is_err());
         assert!(decode_base64_png("data:image/png;base64,@@@invalid@@@").is_err());
+    }
+
+    #[test]
+    fn test_save_png_bytes_to_file_creates_valid_file() {
+        let dummy_png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13];
+        let res = save_png_bytes_to_file(&dummy_png, None, false).expect("save_png_bytes_to_file should succeed");
+        assert!(res.is_some());
+        let path_str = res.unwrap();
+        let path = std::path::Path::new(&path_str);
+        assert!(path.exists());
+        let _ = std::fs::remove_file(path); // clean up test file
     }
 
     #[test]
