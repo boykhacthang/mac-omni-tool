@@ -857,6 +857,11 @@ pub unsafe fn prepare_screenshot_window_hidden(
         msg1_bool(
             ns_win,
             sel_registerName(c"setIgnoresMouseEvents:".as_ptr()),
+            false,
+        );
+        msg1_bool(
+            ns_win,
+            sel_registerName(c"setAcceptsMouseMovedEvents:".as_ptr()),
             true,
         );
         // MoveToActiveSpace | Transient | FullScreenAuxiliary (266)

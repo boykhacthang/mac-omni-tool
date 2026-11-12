@@ -1,9 +1,9 @@
 {
   "version": "2.3.1",
-  "published_at": "2026-11-11",
+  "published_at": "2026-11-12",
   "zip_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.3.1/MacOmniTool-v2.3.1-macOS.zip",
   "dmg_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.3.1/MacOmniTool-v2.3.1-Installer.dmg",
-  "sha256_zip": "f0acba67726e7d07efdbd6e4f7d599deee178245639e564ed2ae2460f96bfbba",
-  "notes_en": "v2.3.1: T\u1ed1i \u01b0u RAM (~50 MB) & s\u1eeda l\u1ed7i ph\u00edm t\u1eaft ch\u1ee5p m\u00e0n h\u00ecnh (Ctrl+Shift+0 / Cmd+Shift+0) khi \u1ea9n/\u0111\u00f3ng app ch\u1ea1y ng\u1ea7m",
-  "notes_vi": "v2.3.1: T\u1ed1i \u01b0u RAM (~50 MB) & s\u1eeda l\u1ed7i ph\u00edm t\u1eaft ch\u1ee5p m\u00e0n h\u00ecnh (Ctrl+Shift+0 / Cmd+Shift+0) khi \u1ea9n/\u0111\u00f3ng app ch\u1ea1y ng\u1ea7m"
+  "sha256_zip": "9072bf74fb4ccb7633d67823701412be139daaaa8928ae4bb2a60ce99d6a7de7",
+  "notes_en": "v2.3.1: S\u1eeda tri\u1ec7t \u0111\u1ec3 l\u1ed7i ph\u00edm t\u1eaft ch\u1ee5p m\u00e0n h\u00ecnh (Ctrl+Shift+0 / Cmd+Shift+0) khi \u1ea5n Esc r\u1ed3i m\u1edf l\u1ea1i l\u1ea7n 2, kh\u1eafc ph\u1ee5c t\u00ecnh tr\u1ea1ng m\u1ea5t ph\u1ea3n h\u1ed3i chu\u1ed9t tr\u00ean overlay",
+  "notes_vi": "v2.3.1: S\u1eeda tri\u1ec7t \u0111\u1ec3 l\u1ed7i ph\u00edm t\u1eaft ch\u1ee5p m\u00e0n h\u00ecnh (Ctrl+Shift+0 / Cmd+Shift+0) khi \u1ea5n Esc r\u1ed3i m\u1edf l\u1ea1i l\u1ea7n 2, kh\u1eafc ph\u1ee5c t\u00ecnh tr\u1ea1ng m\u1ea5t ph\u1ea3n h\u1ed3i chu\u1ed9t tr\u00ean overlay"
 }

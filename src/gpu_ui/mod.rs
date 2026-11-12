@@ -464,11 +464,11 @@ impl WindowGpuSurface {
             event,
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }
         );
-        if !is_dpi_or_resize && !self.window.is_visible().unwrap_or(false) {
+        if !is_dpi_or_resize && self.surface.is_none() {
             return false;
         }
         let resp = self.egui_state.on_window_event(&self.window, event);
-        if resp.repaint && self.window.is_visible().unwrap_or(false) {
+        if resp.repaint && self.surface.is_some() {
             self.window.request_redraw();
         }
         resp.consumed

@@ -21,12 +21,7 @@ static WINDOW_TILING_HOTKEY_REFS: OnceLock<Mutex<Vec<(usize, String)>>> = OnceLo
 static FEATURE_HOTKEY_REFS: OnceLock<Mutex<Vec<usize>>> = OnceLock::new();
 
 unsafe fn primary_carbon_target() -> *mut c_void {
-    let disp = GetEventDispatcherTarget();
-    if !disp.is_null() {
-        disp
-    } else {
-        GetApplicationEventTarget()
-    }
+    GetApplicationEventTarget()
 }
 
 fn window_tiling_refs() -> &'static Mutex<Vec<(usize, String)>> {
@@ -334,26 +329,8 @@ pub fn register_native_carbon_hotkeys() {
             event_class: K_EVENT_CLASS_KEYBOARD,
             event_kind: K_EVENT_HOT_KEY_PRESSED,
         };
-        let disp_target = GetEventDispatcherTarget();
-        if !disp_target.is_null() && CARBON_DISP_HANDLER_REF.load(Ordering::SeqCst) == 0 {
-            let mut handler_ref: *mut c_void = std::ptr::null_mut();
-            let status = InstallEventHandler(
-                disp_target,
-                carbon_hotkey_handler,
-                1,
-                &spec,
-                std::ptr::null_mut(),
-                &mut handler_ref,
-            );
-            if status == 0 && !handler_ref.is_null() {
-                CARBON_DISP_HANDLER_REF.store(handler_ref as i64, Ordering::SeqCst);
-            }
-        }
         let app_target = GetApplicationEventTarget();
-        if !app_target.is_null()
-            && app_target != disp_target
-            && CARBON_APP_HANDLER_REF.load(Ordering::SeqCst) == 0
-        {
+        if !app_target.is_null() && CARBON_APP_HANDLER_REF.load(Ordering::SeqCst) == 0 {
             let mut handler_ref: *mut c_void = std::ptr::null_mut();
             let status = InstallEventHandler(
                 app_target,
@@ -365,6 +342,24 @@ pub fn register_native_carbon_hotkeys() {
             );
             if status == 0 && !handler_ref.is_null() {
                 CARBON_APP_HANDLER_REF.store(handler_ref as i64, Ordering::SeqCst);
+            }
+        }
+        let disp_target = GetEventDispatcherTarget();
+        if !disp_target.is_null()
+            && disp_target != app_target
+            && CARBON_DISP_HANDLER_REF.load(Ordering::SeqCst) == 0
+        {
+            let mut handler_ref: *mut c_void = std::ptr::null_mut();
+            let status = InstallEventHandler(
+                disp_target,
+                carbon_hotkey_handler,
+                1,
+                &spec,
+                std::ptr::null_mut(),
+                &mut handler_ref,
+            );
+            if status == 0 && !handler_ref.is_null() {
+                CARBON_DISP_HANDLER_REF.store(handler_ref as i64, Ordering::SeqCst);
             }
         }
     }

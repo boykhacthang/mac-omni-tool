@@ -334,6 +334,7 @@ impl OmniGpuApp {
             sess.revealed = false;
             sess.active_slot = None;
             sess.capturing = false;
+            sess.capture_seq = sess.capture_seq.wrapping_add(1);
             sess.slots.clear();
             (rev, std::mem::replace(&mut sess.prev_frontmost_pid, 0))
         };
