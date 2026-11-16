@@ -301,6 +301,9 @@ pub struct WindowGpuSurface {
     pub fonts_loaded: bool,
     pub transparent: bool,
     pub last_theme_light: Option<bool>,
+    pub msaa_samples: u32,
+    pub msaa_view: Option<wgpu::TextureView>,
+    pub msaa_size: (u32, u32),
 }
 
 impl WindowGpuSurface {
@@ -347,6 +350,9 @@ impl WindowGpuSurface {
             fonts_loaded: false,
             transparent,
             last_theme_light: None,
+            msaa_samples: 1,
+            msaa_view: None,
+            msaa_size: (0, 0),
         };
 
         if create_surface_now {
@@ -354,6 +360,30 @@ impl WindowGpuSurface {
         }
 
         this
+    }
+
+    fn recreate_msaa_view(&mut self, gpu: &GpuContext, width: u32, height: u32) {
+        if self.msaa_samples <= 1 || width == 0 || height == 0 {
+            self.msaa_view = None;
+            self.msaa_size = (0, 0);
+            return;
+        }
+        let tex = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("MacOmniTool MSAA Target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: self.msaa_samples,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.config.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        self.msaa_view = Some(tex.create_view(&wgpu::TextureViewDescriptor::default()));
+        self.msaa_size = (width, height);
     }
 
     /// Lazily create and configure the Metal `wgpu::Surface`, `egui_wgpu::Renderer`,
@@ -375,6 +405,22 @@ impl WindowGpuSurface {
                     .find(|f| *f == wgpu::TextureFormat::Bgra8Unorm || *f == wgpu::TextureFormat::Rgba8Unorm)
                     .or_else(|| caps.formats.first().copied())
                     .unwrap_or(self.surface_format);
+                let msaa = if gpu
+                    .adapter
+                    .get_texture_format_features(format)
+                    .flags
+                    .sample_count_supported(4)
+                {
+                    4
+                } else {
+                    1
+                };
+                if self.msaa_samples != msaa {
+                    self.msaa_samples = msaa;
+                    self.msaa_view = None;
+                    self.msaa_size = (0, 0);
+                    self.renderer = None;
+                }
                 let alpha_mode = if self.transparent
                     && caps
                         .alpha_modes
@@ -394,6 +440,17 @@ impl WindowGpuSurface {
                         .unwrap_or(wgpu::CompositeAlphaMode::Auto)
                 };
 
+                let sf = (self.window.scale_factor() as f32).max(1.0);
+                self.egui_ctx.set_pixels_per_point(sf);
+                let viewport_id = self.egui_ctx.viewport_id();
+                self.egui_state = egui_winit::State::new(
+                    self.egui_ctx.clone(),
+                    viewport_id,
+                    self.window.as_ref(),
+                    Some(sf),
+                    None,
+                    Some(1024),
+                );
                 let size = self.window.inner_size();
                 self.config.format = format;
                 self.config.alpha_mode = alpha_mode;
@@ -411,8 +468,8 @@ impl WindowGpuSurface {
                 &gpu.device,
                 self.config.format,
                 None,
-                1,
-                false,
+                self.msaa_samples,
+                true,
             ));
         }
     }
@@ -420,7 +477,9 @@ impl WindowGpuSurface {
     /// Drop the Metal `wgpu::Surface` (`CAMetalLayer` swapchain drawables), `egui_wgpu::Renderer`
     /// (GPU textures/buffers), and `egui::Context` caches when the window is hidden to the background
     /// so hidden windows consume 0 MB of swapchain `IOSurface`s, 0 MB of `wgpu::Texture`s, and 0 MB of CPU caches.
-    pub fn suspend_surface(&mut self, gpu: &GpuContext) {
+    pub fn suspend_surface(&mut self, gpu: &GpuContext, trim_queue: bool) {
+        self.msaa_view = None;
+        self.msaa_size = (0, 0);
         if self.surface.is_none() && self.renderer.is_none() && !self.fonts_loaded {
             return;
         }
@@ -438,7 +497,9 @@ impl WindowGpuSurface {
         );
         self.fonts_loaded = false;
         self.last_theme_light = None;
-        gpu.trim_command_queue();
+        if trim_queue {
+            gpu.trim_command_queue();
+        }
         unsafe {
             crate::macos_window::release_nswindow_metal_layer(&self.window);
         }
@@ -449,10 +510,15 @@ impl WindowGpuSurface {
         if width == 0 || height == 0 {
             return;
         }
+        let sf = (self.window.scale_factor() as f32).max(1.0);
+        self.egui_ctx.set_pixels_per_point(sf);
         self.config.width = width;
         self.config.height = height;
         if let Some(surface) = &self.surface {
             surface.configure(&gpu.device, &self.config);
+            unsafe {
+                crate::macos_window::optimize_nswindow_metal_layer(&self.window);
+            }
         }
     }
 
@@ -500,21 +566,32 @@ impl WindowGpuSurface {
             self.resize(gpu, win_size.width, win_size.height);
         }
 
-        let (Some(surface), Some(renderer)) = (&self.surface, &mut self.renderer) else {
-            return std::time::Duration::MAX;
-        };
-
-        let output_frame = match surface.get_current_texture() {
-            Ok(frame) => frame,
-            Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => {
-                surface.configure(&gpu.device, &self.config);
-                match surface.get_current_texture() {
-                    Ok(frame) => frame,
-                    Err(_) => return std::time::Duration::MAX,
+        let output_frame = {
+            let Some(surface) = &self.surface else {
+                return std::time::Duration::MAX;
+            };
+            match surface.get_current_texture() {
+                Ok(frame) => frame,
+                Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => {
+                    surface.configure(&gpu.device, &self.config);
+                    match surface.get_current_texture() {
+                        Ok(frame) => frame,
+                        Err(_) => return std::time::Duration::MAX,
+                    }
                 }
+                Err(_) => return std::time::Duration::MAX,
             }
-            Err(_) => return std::time::Duration::MAX,
         };
+        if self.renderer.is_none() {
+            return std::time::Duration::MAX;
+        }
+
+        let tex_size = output_frame.texture.size();
+        if self.msaa_samples > 1
+            && (self.msaa_view.is_none() || self.msaa_size != (tex_size.width, tex_size.height))
+        {
+            self.recreate_msaa_view(gpu, tex_size.width, tex_size.height);
+        }
 
         let scale_factor = (self.window.scale_factor() as f32).max(1.0);
         let mut raw_input = self.egui_state.take_egui_input(&self.window);
@@ -540,12 +617,16 @@ impl WindowGpuSurface {
         let ppp = full_output.pixels_per_point.max(1.0);
         let tris = self.egui_ctx.tessellate(full_output.shapes, ppp);
 
+        let Some(renderer) = &mut self.renderer else {
+            return std::time::Duration::MAX;
+        };
+
         for (id, image_delta) in &full_output.textures_delta.set {
             renderer.update_texture(&gpu.device, &gpu.queue, *id, image_delta);
         }
 
         let screen_descriptor = egui_wgpu::ScreenDescriptor {
-            size_in_pixels: [self.config.width, self.config.height],
+            size_in_pixels: [tex_size.width.max(1), tex_size.height.max(1)],
             pixels_per_point: ppp,
         };
 
@@ -567,12 +648,19 @@ impl WindowGpuSurface {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
+        let (color_view, resolve_target, store_op) =
+            if let Some(msaa_view) = self.msaa_view.as_ref().filter(|_| self.msaa_samples > 1) {
+                (msaa_view, Some(&view), wgpu::StoreOp::Discard)
+            } else {
+                (&view, None, wgpu::StoreOp::Store)
+            };
+
         {
             let rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("MacOmniTool Egui RenderPass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
+                    view: color_view,
+                    resolve_target,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             r: clear_rgba[0] as f64,
@@ -580,7 +668,7 @@ impl WindowGpuSurface {
                             b: clear_rgba[2] as f64,
                             a: clear_rgba[3] as f64,
                         }),
-                        store: wgpu::StoreOp::Store,
+                        store: store_op,
                     },
                 })],
                 depth_stencil_attachment: None,
@@ -597,7 +685,6 @@ impl WindowGpuSurface {
 
         gpu.queue.submit(std::iter::once(encoder.finish()));
         output_frame.present();
-        gpu.trim_command_queue();
 
         if min_repaint_delay.is_zero() {
             self.window.request_redraw();
@@ -678,7 +765,7 @@ pub fn palette() -> Palette {
             warning: Color32::from_rgb(245, 158, 11),         // #f59e0b
             warning_soft: Color32::from_rgb(72, 50, 20),      // #483214 (100% opaque amber)
             danger: Color32::from_rgb(239, 68, 68),           // #ef4444
-            danger_soft: Color32::from_rgb(74, 28, 34),       // #4a1c22 (100% opaque crimson)
+            danger_soft: Color32::from_rgb(66, 26, 33),       // #421a21 (100% opaque crimson)
         }
     }
 }
@@ -701,7 +788,7 @@ pub fn apply_omni_theme(ctx: &egui::Context) {
     visuals.selection.bg_fill = p.accent_soft;
     visuals.selection.stroke = Stroke::new(1.0_f32, p.accent_text);
 
-    let r = Rounding::same(6.0);
+    let r = Rounding::same(7.5);
     visuals.widgets.noninteractive.bg_fill = p.bg_card;
     visuals.widgets.noninteractive.weak_bg_fill = p.bg_card;
     visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, p.border);
@@ -720,6 +807,7 @@ pub fn apply_omni_theme(ctx: &egui::Context) {
     visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, p.accent);
     visuals.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, p.text_primary);
     visuals.widgets.hovered.rounding = r;
+    visuals.widgets.hovered.expansion = 0.0;
 
     // IMPORTANT: `visuals.widgets.active.fg_stroke.color` is used by `egui` as `visuals.strong_text_color()`
     // for all `RichText::new(...).strong()` calls! It MUST be `p.text_primary` (never hardcoded WHITE),
@@ -729,12 +817,14 @@ pub fn apply_omni_theme(ctx: &egui::Context) {
     visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, p.accent);
     visuals.widgets.active.fg_stroke = Stroke::new(1.0_f32, p.text_primary);
     visuals.widgets.active.rounding = r;
+    visuals.widgets.active.expansion = 0.0;
 
     visuals.widgets.open.bg_fill = p.accent_soft;
     visuals.widgets.open.weak_bg_fill = p.accent_soft;
     visuals.widgets.open.bg_stroke = Stroke::new(1.0_f32, p.accent);
     visuals.widgets.open.fg_stroke = Stroke::new(1.0_f32, p.text_primary);
     visuals.widgets.open.rounding = r;
+    visuals.widgets.open.expansion = 0.0;
 
     style.visuals = visuals;
     style.text_styles.insert(
@@ -758,7 +848,7 @@ pub fn apply_omni_theme(ctx: &egui::Context) {
         FontId::new(11.5, FontFamily::Proportional),
     );
     style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-    style.spacing.button_padding = egui::vec2(10.0, 5.5);
+    style.spacing.button_padding = egui::vec2(10.0, 6.0);
     style.spacing.window_margin = Margin::same(14.0);
     // Require holding cursor still for 0.5s before showing tooltips
     style.interaction.tooltip_delay = 0.5;
@@ -1164,52 +1254,477 @@ pub fn render_floating_toast(
     }
 }
 
-/// Primary accent button.
+pub(crate) fn snap_rect_to_pixels(ui: &egui::Ui, rect: Rect) -> Rect {
+    let ppp = ui.ctx().pixels_per_point().max(1.0);
+    Rect::from_min_max(
+        egui::pos2(
+            (rect.min.x * ppp).round() / ppp,
+            (rect.min.y * ppp).round() / ppp,
+        ),
+        egui::pos2(
+            (rect.max.x * ppp).round() / ppp,
+            (rect.max.y * ppp).round() / ppp,
+        ),
+    )
+}
+
+fn draw_round_cap_line(
+    painter: &egui::Painter,
+    a: egui::Pos2,
+    b: egui::Pos2,
+    width: f32,
+    color: Color32,
+) {
+    painter.line_segment([a, b], Stroke::new(width, color));
+    let cap_r = width * 0.5;
+    painter.circle_filled(a, cap_r, color);
+    painter.circle_filled(b, cap_r, color);
+}
+
+/// Crisp anti-aliased vector power symbol (`⏻`).
+pub fn draw_vector_power_icon(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    size: f32,
+    color: Color32,
+) {
+    let radius = size * 0.39;
+    let stroke_w = 1.65;
+    let cy = center.y + 0.5;
+    let start_deg = -52.0_f32;
+    let end_deg = 232.0_f32;
+    let steps = 28;
+    let mut pts = Vec::with_capacity(steps + 1);
+    for i in 0..=steps {
+        let t = i as f32 / steps as f32;
+        let rad = (start_deg + (end_deg - start_deg) * t).to_radians();
+        pts.push(egui::pos2(
+            center.x + radius * rad.cos(),
+            cy + radius * rad.sin(),
+        ));
+    }
+    if let (Some(&first), Some(&last)) = (pts.first(), pts.last()) {
+        painter.add(egui::Shape::line(pts, Stroke::new(stroke_w, color)));
+        painter.circle_filled(first, stroke_w * 0.5, color);
+        painter.circle_filled(last, stroke_w * 0.5, color);
+    }
+    draw_round_cap_line(
+        painter,
+        egui::pos2(center.x, cy - radius * 1.12),
+        egui::pos2(center.x, cy - radius * 0.08),
+        stroke_w,
+        color,
+    );
+}
+
+/// Crisp SF-Symbols-style anti-aliased vector trash bin icon.
+pub fn draw_vector_trash_icon(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    size: f32,
+    color: Color32,
+) {
+    let s = size;
+    let lid_y = center.y - s * 0.24;
+    let lid_hw = s * 0.36;
+    draw_round_cap_line(
+        painter,
+        egui::pos2(center.x - lid_hw, lid_y),
+        egui::pos2(center.x + lid_hw, lid_y),
+        1.35,
+        color,
+    );
+
+    // Handle arch above lid
+    let h_hw = s * 0.14;
+    let h_top = center.y - s * 0.39;
+    let h_r = s * 0.04;
+    let handle_pts = vec![
+        egui::pos2(center.x - h_hw, lid_y),
+        egui::pos2(center.x - h_hw, h_top + h_r),
+        egui::pos2(center.x - h_hw + h_r, h_top),
+        egui::pos2(center.x + h_hw - h_r, h_top),
+        egui::pos2(center.x + h_hw, h_top + h_r),
+        egui::pos2(center.x + h_hw, lid_y),
+    ];
+    painter.add(egui::Shape::line(handle_pts, Stroke::new(1.25_f32, color)));
+
+    // U-shaped basket body with 6-segment rounded bottom corners
+    let top_y = center.y - s * 0.14;
+    let bot_y = center.y + s * 0.38;
+    let top_hw = s * 0.28;
+    let bot_hw = s * 0.23;
+    let r = s * 0.08;
+    let mut body_pts = Vec::with_capacity(18);
+    body_pts.push(egui::pos2(center.x - top_hw, top_y));
+    body_pts.push(egui::pos2(center.x - bot_hw - r * 0.2, bot_y - r));
+    let bl_cx = center.x - bot_hw + r;
+    let bl_cy = bot_y - r;
+    for i in 0..=6 {
+        let a = std::f32::consts::PI - (i as f32 / 6.0) * std::f32::consts::FRAC_PI_2;
+        body_pts.push(egui::pos2(bl_cx + r * a.cos(), bl_cy + r * a.sin()));
+    }
+    let br_cx = center.x + bot_hw - r;
+    let br_cy = bot_y - r;
+    for i in 0..=6 {
+        let a = std::f32::consts::FRAC_PI_2 - (i as f32 / 6.0) * std::f32::consts::FRAC_PI_2;
+        body_pts.push(egui::pos2(br_cx + r * a.cos(), br_cy + r * a.sin()));
+    }
+    body_pts.push(egui::pos2(center.x + top_hw, top_y));
+    if let (Some(&first), Some(&last)) = (body_pts.first(), body_pts.last()) {
+        painter.add(egui::Shape::line(body_pts, Stroke::new(1.3_f32, color)));
+        painter.circle_filled(first, 0.65, color);
+        painter.circle_filled(last, 0.65, color);
+    }
+
+    // Two clean inner vertical ribs
+    let rib_x = s * 0.095;
+    let rib_top = center.y - s * 0.02;
+    let rib_bot = center.y + s * 0.24;
+    draw_round_cap_line(
+        painter,
+        egui::pos2(center.x - rib_x, rib_top),
+        egui::pos2(center.x - rib_x, rib_bot),
+        1.15,
+        color,
+    );
+    draw_round_cap_line(
+        painter,
+        egui::pos2(center.x + rib_x, rib_top),
+        egui::pos2(center.x + rib_x, rib_bot),
+        1.15,
+        color,
+    );
+}
+
+/// Crisp anti-aliased vector close (`×`) icon.
+pub fn draw_vector_close_icon(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    size: f32,
+    color: Color32,
+) {
+    let d = size * 0.27;
+    draw_round_cap_line(
+        painter,
+        egui::pos2(center.x - d, center.y - d),
+        egui::pos2(center.x + d, center.y + d),
+        1.6,
+        color,
+    );
+    draw_round_cap_line(
+        painter,
+        egui::pos2(center.x + d, center.y - d),
+        egui::pos2(center.x - d, center.y + d),
+        1.6,
+        color,
+    );
+}
+
+fn danger_button_colors(enabled: bool, hovered: bool, active: bool) -> (Color32, Color32) {
+    let p = palette();
+    let idle_fill = p.danger_soft;
+    let idle_fg = if is_light_theme() {
+        Color32::from_rgb(190, 24, 35)
+    } else {
+        Color32::from_rgb(252, 145, 145)
+    };
+    if !enabled {
+        return (idle_fill.gamma_multiply(0.45), idle_fg.gamma_multiply(0.45));
+    }
+    if active {
+        (Color32::from_rgb(185, 28, 28), Color32::WHITE)
+    } else if hovered {
+        (Color32::from_rgb(220, 38, 38), Color32::WHITE)
+    } else {
+        (idle_fill, idle_fg)
+    }
+}
+
+/// Primary accent button (borderless, pixel-snapped, smooth hover feedback).
 pub fn primary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
     let p = palette();
     let clean = sanitize_ui_text(label);
-    let btn = egui::Button::new(
-        egui::RichText::new(clean)
-            .size(12.0)
-            .strong()
-            .color(Color32::WHITE),
-    )
-    .fill(p.accent)
-    .stroke(Stroke::new(1.0_f32, p.accent))
-    .rounding(Rounding::same(6.0));
-    ui.add(btn)
+    let galley = egui::WidgetText::from(RichText::new(clean).size(12.0).strong()).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Button,
+    );
+    let desired = egui::vec2(
+        (galley.size().x + 22.0).ceil(),
+        (galley.size().y + 11.0).max(26.0).ceil(),
+    );
+    let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if ui.is_rect_visible(rect) {
+        let light = is_light_theme();
+        let active = resp.is_pointer_button_down_on();
+        let fill = if active {
+            Color32::from_rgb(30, 64, 175)
+        } else if resp.hovered() {
+            if light {
+                Color32::from_rgb(29, 78, 216)
+            } else {
+                Color32::from_rgb(79, 146, 255)
+            }
+        } else {
+            p.accent
+        };
+        let snapped = snap_rect_to_pixels(ui, rect);
+        ui.painter()
+            .rect_filled(snapped, Rounding::same(7.5), fill);
+        let text_pos = egui::pos2(
+            snapped.center().x - galley.size().x * 0.5,
+            snapped.center().y - galley.size().y * 0.5,
+        );
+        ui.painter()
+            .galley_with_override_text_color(text_pos, galley, Color32::WHITE);
+    }
+    resp
 }
 
-/// Secondary subtle button.
+/// Secondary subtle button (renders smooth vector `×` close icon when label starts with `✕`).
 pub fn secondary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
     let p = palette();
     let clean = sanitize_ui_text(label);
-    let btn = egui::Button::new(
-        egui::RichText::new(clean)
-            .size(12.0)
-            .strong()
-            .color(p.text_primary),
-    )
-    .fill(p.bg_card_hover)
-    .stroke(Stroke::new(1.0_f32, p.border))
-    .rounding(Rounding::same(6.0));
-    ui.add(btn)
+    let trimmed = clean.trim();
+
+    if trimmed == "✕" {
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), Sense::click());
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if ui.is_rect_visible(rect) {
+            let active = resp.is_pointer_button_down_on();
+            let (fill, fg) = if active || resp.hovered() {
+                (p.accent_soft, p.text_primary)
+            } else {
+                (p.bg_card_hover, p.text_secondary)
+            };
+            let snapped = snap_rect_to_pixels(ui, rect);
+            ui.painter()
+                .rect_filled(snapped, Rounding::same(7.0), fill);
+            draw_vector_close_icon(ui.painter(), snapped.center(), 13.0, fg);
+        }
+        return resp;
+    }
+
+    let (has_close, text_part) = if let Some(rest) = trimmed.strip_prefix('✕') {
+        (true, rest.trim())
+    } else {
+        (false, trimmed)
+    };
+
+    let galley = egui::WidgetText::from(RichText::new(text_part).size(12.0).strong()).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Button,
+    );
+    let icon_w = if has_close { 12.0 + 5.0 } else { 0.0 };
+    let content_w = icon_w + galley.size().x;
+    let desired = egui::vec2(
+        (content_w + 20.0).ceil(),
+        (galley.size().y + 11.0).max(26.0).ceil(),
+    );
+    let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if ui.is_rect_visible(rect) {
+        let active = resp.is_pointer_button_down_on();
+        let (fill, stroke_col, fg) = if active || resp.hovered() {
+            (p.accent_soft, p.accent_border, p.accent_text)
+        } else {
+            (p.bg_card_hover, p.border, p.text_primary)
+        };
+        let snapped = snap_rect_to_pixels(ui, rect);
+        ui.painter().rect(
+            snapped,
+            Rounding::same(7.5),
+            fill,
+            Stroke::new(1.0_f32, stroke_col),
+        );
+        let mut x = snapped.center().x - content_w * 0.5;
+        if has_close {
+            draw_vector_close_icon(
+                ui.painter(),
+                egui::pos2(x + 6.0, snapped.center().y),
+                12.0,
+                fg,
+            );
+            x += 17.0;
+        }
+        let text_pos = egui::pos2(x, snapped.center().y - galley.size().y * 0.5);
+        ui.painter()
+            .galley_with_override_text_color(text_pos, galley, fg);
+    }
+    resp
 }
 
-/// Danger red button.
-pub fn danger_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
-    let p = palette();
+enum DangerIconKind {
+    None,
+    Trash,
+    Close,
+}
+
+/// Danger red button with optional enabled state, zero border, and crisp vector icons.
+pub fn danger_button_enabled(ui: &mut egui::Ui, enabled: bool, label: &str) -> egui::Response {
     let clean = sanitize_ui_text(label);
-    let btn = egui::Button::new(
-        egui::RichText::new(clean)
-            .size(12.0)
-            .strong()
-            .color(p.danger),
-    )
-    .fill(p.danger_soft)
-    .stroke(Stroke::new(1.0_f32, p.danger))
-    .rounding(Rounding::same(6.0));
-    ui.add(btn)
+    let trimmed = clean.trim();
+    let (icon_kind, text_part) = if trimmed == "🗑" {
+        (DangerIconKind::Trash, "")
+    } else if trimmed == "✕" {
+        (DangerIconKind::Close, "")
+    } else if let Some(rest) = trimmed.strip_prefix('🗑') {
+        (DangerIconKind::Trash, rest.trim())
+    } else if let Some(rest) = trimmed.strip_prefix('✕') {
+        (DangerIconKind::Close, rest.trim())
+    } else {
+        (DangerIconKind::None, trimmed)
+    };
+
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+
+    if text_part.is_empty() && !matches!(icon_kind, DangerIconKind::None) {
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(28.0, 26.0), sense);
+        if enabled && resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if ui.is_rect_visible(rect) {
+            let (fill, fg) =
+                danger_button_colors(enabled, resp.hovered(), resp.is_pointer_button_down_on());
+            let snapped = snap_rect_to_pixels(ui, rect);
+            ui.painter()
+                .rect_filled(snapped, Rounding::same(7.5), fill);
+            match icon_kind {
+                DangerIconKind::Trash => {
+                    draw_vector_trash_icon(ui.painter(), snapped.center(), 14.0, fg);
+                }
+                DangerIconKind::Close => {
+                    draw_vector_close_icon(ui.painter(), snapped.center(), 13.5, fg);
+                }
+                DangerIconKind::None => {}
+            }
+        }
+        return resp;
+    }
+
+    let galley = egui::WidgetText::from(RichText::new(text_part).size(12.0).strong()).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Button,
+    );
+    let (icon_sz, gap) = match icon_kind {
+        DangerIconKind::Trash => (13.5, 5.5),
+        DangerIconKind::Close => (12.5, 5.5),
+        DangerIconKind::None => (0.0, 0.0),
+    };
+    let content_w = if icon_sz > 0.0 {
+        icon_sz + gap + galley.size().x
+    } else {
+        galley.size().x
+    };
+    let desired = egui::vec2(
+        (content_w + 22.0).ceil(),
+        (galley.size().y + 11.0).max(26.0).ceil(),
+    );
+    let (rect, resp) = ui.allocate_exact_size(desired, sense);
+    if enabled && resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if ui.is_rect_visible(rect) {
+        let (fill, fg) =
+            danger_button_colors(enabled, resp.hovered(), resp.is_pointer_button_down_on());
+        let snapped = snap_rect_to_pixels(ui, rect);
+        ui.painter()
+            .rect_filled(snapped, Rounding::same(7.5), fill);
+        let mut x = snapped.center().x - content_w * 0.5;
+        match icon_kind {
+            DangerIconKind::Trash => {
+                draw_vector_trash_icon(
+                    ui.painter(),
+                    egui::pos2(x + icon_sz * 0.5, snapped.center().y),
+                    icon_sz,
+                    fg,
+                );
+                x += icon_sz + gap;
+            }
+            DangerIconKind::Close => {
+                draw_vector_close_icon(
+                    ui.painter(),
+                    egui::pos2(x + icon_sz * 0.5, snapped.center().y),
+                    icon_sz,
+                    fg,
+                );
+                x += icon_sz + gap;
+            }
+            DangerIconKind::None => {}
+        }
+        let text_pos = egui::pos2(x, snapped.center().y - galley.size().y * 0.5);
+        ui.painter()
+            .galley_with_override_text_color(text_pos, galley, fg);
+    }
+    resp
+}
+
+/// Danger red button (borderless, smooth soft-red idle -> vibrant red hover).
+pub fn danger_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    danger_button_enabled(ui, true, label)
+}
+
+/// Smooth borderless Quit App pill button with vector Power symbol (`⏻`) and label.
+pub fn quit_power_button(ui: &mut egui::Ui, size: egui::Vec2, label: &str) -> egui::Response {
+    let clean = sanitize_ui_text(label);
+    let galley = egui::WidgetText::from(RichText::new(clean.trim()).size(12.0).strong())
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Button,
+        );
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if ui.is_rect_visible(rect) {
+        let (fill, fg) =
+            danger_button_colors(true, resp.hovered(), resp.is_pointer_button_down_on());
+        let snapped = snap_rect_to_pixels(ui, rect);
+        ui.painter()
+            .rect_filled(snapped, Rounding::same(8.0), fill);
+        let icon_sz = 14.0;
+        let gap = 6.0;
+        let content_w = if galley.size().x > 0.0 {
+            icon_sz + gap + galley.size().x
+        } else {
+            icon_sz
+        };
+        let x = snapped.center().x - content_w * 0.5;
+        draw_vector_power_icon(
+            ui.painter(),
+            egui::pos2(x + icon_sz * 0.5, snapped.center().y),
+            icon_sz,
+            fg,
+        );
+        if galley.size().x > 0.0 {
+            let text_pos = egui::pos2(
+                x + icon_sz + gap,
+                snapped.center().y - galley.size().y * 0.5,
+            );
+            ui.painter()
+            .galley_with_override_text_color(text_pos, galley, fg);
+        }
+    }
+    resp
 }
 
 /// Styled horizontal progress bar (`0.0..=1.0`).
@@ -1892,6 +2407,179 @@ mod tests {
             }
             gpu.queue.submit(std::iter::once(encoder.finish()));
             gpu.trim_command_queue();
+        }
+    }
+
+    #[test]
+    fn test_msaa_and_smooth_vector_buttons_render() {
+        struct ThemeRestoreGuard(String);
+        impl Drop for ThemeRestoreGuard {
+            fn drop(&mut self) {
+                crate::i18n::set_theme(&self.0);
+            }
+        }
+
+        let prev_prefs = crate::i18n::init_ui_prefs();
+        let _restore = ThemeRestoreGuard(prev_prefs.theme.clone());
+
+        let gpu = GpuContext::new();
+        let format = wgpu::TextureFormat::Bgra8Unorm;
+        let sample_count = if gpu
+            .adapter
+            .get_texture_format_features(format)
+            .flags
+            .sample_count_supported(4)
+        {
+            4
+        } else {
+            1
+        };
+
+        let mut renderer = egui_wgpu::Renderer::new(&gpu.device, format, None, sample_count, true);
+        let ctx = egui::Context::default();
+        ctx.set_fonts(gpu.fonts.clone());
+
+        let resolve_tex = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Resolve Target"),
+            size: wgpu::Extent3d {
+                width: 640,
+                height: 480,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let resolve_view = resolve_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let msaa_view = if sample_count > 1 {
+            let msaa_tex = gpu.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("MSAA Target"),
+                size: wgpu::Extent3d {
+                    width: 640,
+                    height: 480,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            Some(msaa_tex.create_view(&wgpu::TextureViewDescriptor::default()))
+        } else {
+            None
+        };
+
+        for theme in ["light", "dark"] {
+            crate::i18n::set_theme(theme);
+            apply_omni_theme(&ctx);
+            let raw_input = egui::RawInput {
+                max_texture_side: Some(1024),
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(640.0, 480.0),
+                )),
+                ..Default::default()
+            };
+            let full_output = ctx.run(raw_input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        let _ = quit_power_button(ui, egui::vec2(84.0, 30.0), "Thoát");
+                        let _ = danger_button(ui, "🗑");
+                        let _ = danger_button(ui, "🗑 Xóa");
+                        let _ = danger_button_enabled(ui, false, "🗑 Xóa");
+                        let _ = primary_button(ui, "🚀 Mở Dashboard");
+                        let _ = secondary_button(ui, "✕");
+                    });
+                });
+            });
+            for (id, delta) in &full_output.textures_delta.set {
+                renderer.update_texture(&gpu.device, &gpu.queue, *id, delta);
+            }
+            let tris = ctx.tessellate(full_output.shapes, 1.0);
+            assert!(
+                !tris.is_empty(),
+                "Expected tessellated shapes for smooth vector buttons in {} theme",
+                theme
+            );
+            let sd = egui_wgpu::ScreenDescriptor {
+                size_in_pixels: [640, 480],
+                pixels_per_point: 1.0,
+            };
+            let mut encoder = gpu
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+            renderer.update_buffers(&gpu.device, &gpu.queue, &mut encoder, &tris, &sd);
+            {
+                let (color_view, resolve_target, store_op) = if let Some(mv) = &msaa_view {
+                    (mv, Some(&resolve_view), wgpu::StoreOp::Discard)
+                } else {
+                    (&resolve_view, None, wgpu::StoreOp::Store)
+                };
+                let rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: None,
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: color_view,
+                        resolve_target,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: store_op,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                let mut rpass_static = rpass.forget_lifetime();
+                renderer.render(&mut rpass_static, &tris, &sd);
+            }
+            gpu.queue.submit(std::iter::once(encoder.finish()));
+            gpu.trim_command_queue();
+        }
+
+        // Verify Light Mode primary_button text glyphs are pure Color32::WHITE (never black/dark)
+        crate::i18n::set_theme("light");
+        apply_omni_theme(&ctx);
+        let raw_light = egui::RawInput {
+            max_texture_side: Some(1024),
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(640.0, 480.0),
+            )),
+            ..Default::default()
+        };
+        let out_light = ctx.run(raw_light, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let _ = primary_button(ui, "Mở Dashboard");
+            });
+        });
+        let tris_light = ctx.tessellate(out_light.shapes, 1.0);
+        let mut glyph_colors = Vec::new();
+        for cp in tris_light {
+            if let egui::epaint::Primitive::Mesh(mesh) = cp.primitive {
+                for v in mesh.vertices {
+                    if v.uv != egui::Pos2::ZERO {
+                        glyph_colors.push(v.color);
+                    }
+                }
+            }
+        }
+        assert!(
+            !glyph_colors.is_empty(),
+            "Expected non-empty glyph vertices for primary_button in Light Mode"
+        );
+        for c in glyph_colors {
+            assert_eq!(
+                c,
+                Color32::WHITE,
+                "Expected Light Mode primary_button glyph vertex color to be WHITE, got {:?}",
+                c
+            );
         }
     }
 }

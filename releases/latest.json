@@ -1,9 +1,9 @@
 {
-  "version": "2.3.2",
-  "published_at": "2026-11-12",
-  "zip_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.3.2/MacOmniTool-v2.3.2-macOS.zip",
-  "dmg_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.3.2/MacOmniTool-v2.3.2-Installer.dmg",
-  "sha256_zip": "0125db2f13b6dc5d53f59c0b17243537bbced41bc68cb72abf319975ed6726e8",
-  "notes_en": "v2.3.2: Fixed screen freeze when saving PNG screenshot (asynchronous non-blocking save with instant overlay dismissal), added customizable screenshot save directory with path bar and folder chooser, added system-wide emergency hotkeys (Ctrl+Shift+Esc, rapid triple Esc) and overlay watchdog, removed unused/broken features (Alt-Tab, Finder Cut & Paste).",
-  "notes_vi": "v2.3.2: Sửa triệt để lỗi treo đơ màn hình khi lưu ảnh PNG (lưu bất đồng bộ, giải phóng overlay tức thì), bổ sung tùy chọn thư mục lưu ảnh (Desktop, Downloads, Pictures hoặc duyệt thư mục) hiển thị trực quan trên Cài đặt, bổ sung phím tắt tắt app nóng khẩn cấp (Ctrl+Shift+Esc, bấm Esc 3 lần), và loại bỏ tính năng Alt-Tab cùng Cắt/Dán Finder."
+  "version": "2.3.3",
+  "published_at": "2026-11-16",
+  "zip_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.3.3/MacOmniTool-v2.3.3-macOS.zip",
+  "dmg_url": "https://github.com/boykhacthang/mac-omni-tool/raw/main/releases/v2.3.3/MacOmniTool-v2.3.3-Installer.dmg",
+  "sha256_zip": "29e91b76967c277834856cf4642da96381ba68ed62b78b6e0fa16ec3cbd2a0eb",
+  "notes_en": "v2.3.3: Fixed Menu Bar popover double-blink / reopen on second click (single-click toggle open/close), enabled 4x MSAA hardware anti-aliasing on Metal GPU with smooth borderless red action buttons, fixed high-contrast white text on blue action buttons in Light Mode, and cleaned up debug tracing logs.",
+  "notes_vi": "v2.3.3: Sửa triệt để lỗi Menu Bar popup bị nháy mở lại khi click lần 2 (bật 1 lần mở, click lại ẩn dứt khoát), nâng cấp khử răng cưa 4x MSAA trên Metal GPU cùng thiết kế nút đỏ bo góc không viền mượt mà, sửa màu chữ trắng rõ nét trên các nút hành động màu xanh ở chế độ sáng (Light Mode), và dọn dẹp tối ưu toàn bộ các log tạm."
 }

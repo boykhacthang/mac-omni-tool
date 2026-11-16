@@ -62,6 +62,27 @@ extern "C" {
     pub fn objc_autoreleasePoolPop(pool: *mut c_void);
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct CocoaPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct CocoaSize {
+    pub width: f64,
+    pub height: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct CocoaRect {
+    pub origin: CocoaPoint,
+    pub size: CocoaSize,
+}
+
 unsafe fn is_borderless_overlay_nswindow(this: *mut c_void) -> bool {
     if this.is_null() {
         return false;
@@ -80,6 +101,10 @@ unsafe extern "C" fn tao_is_nonactivating_panel_imp(this: *mut c_void, _sel: *mu
 
 unsafe extern "C" fn tao_can_become_main_window_imp(this: *mut c_void, _sel: *mut c_void) -> bool {
     !is_borderless_overlay_nswindow(this)
+}
+
+unsafe extern "C" fn tao_can_become_key_window_imp(_this: *mut c_void, _sel: *mut c_void) -> bool {
+    true
 }
 
 /// Configure `TaoWindow` (`NSWindow`) so borderless overlay windows return `YES`
@@ -118,6 +143,12 @@ unsafe fn promote_to_nonactivating_overlay_panel(ns_win: *mut c_void) {
         );
         let _ = replace_bool(
             cur_cls,
+            sel_registerName(c"_preventsActivation".as_ptr()),
+            tao_is_nonactivating_panel_imp,
+            c"B@:".as_ptr(),
+        );
+        let _ = replace_bool(
+            cur_cls,
             sel_registerName(c"isFloatingPanel".as_ptr()),
             tao_is_nonactivating_panel_imp,
             c"B@:".as_ptr(),
@@ -132,6 +163,12 @@ unsafe fn promote_to_nonactivating_overlay_panel(ns_win: *mut c_void) {
             cur_cls,
             sel_registerName(c"canBecomeMainWindow".as_ptr()),
             tao_can_become_main_window_imp,
+            c"B@:".as_ptr(),
+        );
+        let _ = replace_bool(
+            cur_cls,
+            sel_registerName(c"canBecomeKeyWindow".as_ptr()),
+            tao_can_become_key_window_imp,
             c"B@:".as_ptr(),
         );
     });
@@ -518,22 +555,38 @@ pub unsafe fn hide_floating_overlay_window(window: &Window) {
     window.set_visible(false);
 }
 
-/// Enable Apple Silicon lossless GPU `IOSurface` compression on the window's `CAMetalLayer`
-/// and ensure its `frame` and `contentsScale` match `contentView.bounds`.
+/// Enable Apple Silicon lossless GPU `IOSurface` compression on the window's `CAMetalLayer`,
+/// set `NSViewLayerContentsRedrawPolicyNever` (`0`) so AppKit never clears/overwrites it in `drawRect:`,
+/// and ensure its `frame` and `contentsScale` match `contentView.bounds` and `backingScaleFactor`.
 pub unsafe fn optimize_nswindow_metal_layer(window: &Window) {
     let pool = objc_autoreleasePoolPush();
     let ns_win = get_ns_window(window);
     if !ns_win.is_null() {
         type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+        type Msg0F64 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> f64;
+        type Msg1F64 = unsafe extern "C" fn(*mut c_void, *mut c_void, f64);
+        type MsgRect = unsafe extern "C" fn(*mut c_void, *mut c_void) -> CocoaRect;
+        type Msg1Rect = unsafe extern "C" fn(*mut c_void, *mut c_void, CocoaRect);
+        type Msg1Isize = unsafe extern "C" fn(*mut c_void, *mut c_void, isize);
         type Msg1Bool = unsafe extern "C" fn(*mut c_void, *mut c_void, bool);
         type Msg1BoolRet = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> bool;
 
         let msg0: Msg0 = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg0_f64: Msg0F64 = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_f64: Msg1F64 = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg_rect: MsgRect = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_rect: Msg1Rect = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_isize: Msg1Isize = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_bool: Msg1Bool = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_bool_ret: Msg1BoolRet = std::mem::transmute(objc_msgSend as *const c_void);
 
         let content_view = msg0(ns_win, sel_registerName(c"contentView".as_ptr()));
         if !content_view.is_null() {
+            msg1_isize(
+                content_view,
+                sel_registerName(c"setLayerContentsRedrawPolicy:".as_ptr()),
+                0,
+            );
             let layer = msg0(content_view, sel_registerName(c"layer".as_ptr()));
             let metal_cls = objc_getClass(c"CAMetalLayer".as_ptr());
             if !layer.is_null()
@@ -544,6 +597,12 @@ pub unsafe fn optimize_nswindow_metal_layer(window: &Window) {
                     metal_cls,
                 )
             {
+                let bounds = msg_rect(content_view, sel_registerName(c"bounds".as_ptr()));
+                msg1_rect(layer, sel_registerName(c"setFrame:".as_ptr()), bounds);
+                let scale = msg0_f64(ns_win, sel_registerName(c"backingScaleFactor".as_ptr()));
+                if scale > 0.5 {
+                    msg1_f64(layer, sel_registerName(c"setContentsScale:".as_ptr()), scale);
+                }
                 let sel_comp = sel_registerName(c"setWantsIOSurfaceCompression:".as_ptr());
                 if msg1_bool_ret(
                     layer,
@@ -558,10 +617,8 @@ pub unsafe fn optimize_nswindow_metal_layer(window: &Window) {
     objc_autoreleasePoolPop(pool);
 }
 
-/// Purge all `IOSurface` backbuffers and cached drawable contents from `window.contentView`'s
-/// `CAMetalLayer` in-place when the window is hidden to the background.
-/// Keeps the `CAMetalLayer` instance attached to `contentView` so `wgpu` reuses it cleanly on reopen
-/// without leaking layers or throwing Objective-C selector exceptions on non-Metal backing layers.
+/// Shrink the `CAMetalLayer` drawable size to `1x1` when the window is hidden to the background
+/// so swapchain backbuffers shrink without destroying the layer's `CAImageQueue` (`removeBackBuffers` / `discardContents` / `setContents: nil`).
 pub unsafe fn release_nswindow_metal_layer(window: &Window) {
     let pool = objc_autoreleasePoolPush();
     let ns_win = get_ns_window(window);
@@ -573,14 +630,10 @@ pub unsafe fn release_nswindow_metal_layer(window: &Window) {
             height: f64,
         }
         type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
-        type Msg0Void = unsafe extern "C" fn(*mut c_void, *mut c_void);
-        type Msg1Ptr = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
         type Msg1Size = unsafe extern "C" fn(*mut c_void, *mut c_void, ObjcSize);
         type Msg1BoolRet = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> bool;
 
         let msg0: Msg0 = std::mem::transmute(objc_msgSend as *const c_void);
-        let msg0_void: Msg0Void = std::mem::transmute(objc_msgSend as *const c_void);
-        let msg1_ptr: Msg1Ptr = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_size: Msg1Size = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_bool_ret: Msg1BoolRet = std::mem::transmute(objc_msgSend as *const c_void);
 
@@ -604,38 +657,6 @@ pub unsafe fn release_nswindow_metal_layer(window: &Window) {
                         height: 1.0,
                     },
                 );
-                let sel_next = sel_registerName(c"nextDrawable".as_ptr());
-                if msg1_bool_ret(
-                    layer,
-                    sel_registerName(c"respondsToSelector:".as_ptr()),
-                    sel_next,
-                ) {
-                    let tiny_drawable = msg0(layer, sel_next);
-                    if !tiny_drawable.is_null() {
-                        msg0_void(tiny_drawable, sel_registerName(c"present".as_ptr()));
-                    }
-                }
-                msg1_ptr(
-                    layer,
-                    sel_registerName(c"setContents:".as_ptr()),
-                    std::ptr::null_mut(),
-                );
-                let sel_remove_bb = sel_registerName(c"removeBackBuffers".as_ptr());
-                if msg1_bool_ret(
-                    layer,
-                    sel_registerName(c"respondsToSelector:".as_ptr()),
-                    sel_remove_bb,
-                ) {
-                    msg0_void(layer, sel_remove_bb);
-                }
-                let sel_discard = sel_registerName(c"discardContents".as_ptr());
-                if msg1_bool_ret(
-                    layer,
-                    sel_registerName(c"respondsToSelector:".as_ptr()),
-                    sel_discard,
-                ) {
-                    msg0_void(layer, sel_discard);
-                }
             }
         }
     }
@@ -646,6 +667,7 @@ pub unsafe fn release_nswindow_metal_layer(window: &Window) {
 /// and restore its opacity and mouse event handling.
 pub unsafe fn show_floating_overlay_window(window: &Window, corner_radius: f64) {
     set_nswindow_rounded_transparent(window, corner_radius);
+    enable_overlay_accepts_first_mouse(window);
     let pool = objc_autoreleasePoolPush();
     let ns_win = get_ns_window(window);
     if !ns_win.is_null() {
@@ -660,19 +682,6 @@ pub unsafe fn show_floating_overlay_window(window: &Window, corner_radius: f64) 
         let msg1_isize: Msg1Isize = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_f64: Msg1F64 = std::mem::transmute(objc_msgSend as *const c_void);
         let msg1_ptr: Msg1Ptr = std::mem::transmute(objc_msgSend as *const c_void);
-
-        let ns_app_cls = objc_getClass(c"NSApplication".as_ptr());
-        if !ns_app_cls.is_null() {
-            let ns_app = msg0(ns_app_cls, sel_registerName(c"sharedApplication".as_ptr()));
-            if !ns_app.is_null() {
-                let _ = msg0(ns_app, sel_registerName(c"unhideWithoutActivation".as_ptr()));
-                msg1_bool(
-                    ns_app,
-                    sel_registerName(c"activateIgnoringOtherApps:".as_ptr()),
-                    true,
-                );
-            }
-        }
 
         promote_to_nonactivating_overlay_panel(ns_win);
         msg1_bool(
@@ -695,6 +704,11 @@ pub unsafe fn show_floating_overlay_window(window: &Window, corner_radius: f64) 
             sel_registerName(c"setIgnoresMouseEvents:".as_ptr()),
             false,
         );
+        msg1_bool(
+            ns_win,
+            sel_registerName(c"setAcceptsMouseMovedEvents:".as_ptr()),
+            true,
+        );
         msg1_f64(ns_win, sel_registerName(c"setAlphaValue:".as_ptr()), 1.0);
         let _ = msg0(ns_win, sel_registerName(c"orderFrontRegardless".as_ptr()));
         msg1_ptr(
@@ -704,8 +718,109 @@ pub unsafe fn show_floating_overlay_window(window: &Window, corner_radius: f64) 
         );
     }
     objc_autoreleasePoolPop(pool);
-    window.set_visible(true);
-    window.focus_window();
+}
+
+/// Re-assert key focus on an already-visible overlay window during its opening grace period.
+pub unsafe fn reassert_overlay_key_focus(window: &Window) {
+    let pool = objc_autoreleasePoolPush();
+    let ns_win = get_ns_window(window);
+    if !ns_win.is_null() {
+        type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+        type MsgBool = unsafe extern "C" fn(*mut c_void, *mut c_void) -> bool;
+        type Msg1Ptr = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
+
+        let msg0: Msg0 = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg_bool: MsgBool = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_ptr: Msg1Ptr = std::mem::transmute(objc_msgSend as *const c_void);
+
+        if msg_bool(ns_win, sel_registerName(c"isVisible".as_ptr())) {
+            let _ = msg0(ns_win, sel_registerName(c"orderFrontRegardless".as_ptr()));
+            msg1_ptr(
+                ns_win,
+                sel_registerName(c"makeKeyAndOrderFront:".as_ptr()),
+                std::ptr::null_mut(),
+            );
+        }
+    }
+    objc_autoreleasePoolPop(pool);
+}
+
+/// Explicitly order out `main_window` and unhide `NSApplication` without activation
+/// so floating overlays can appear normally even after `Cmd+H` / "Hide".
+pub unsafe fn hide_main_nswindow_and_unhide_app(window: &Window) {
+    let pool = objc_autoreleasePoolPush();
+    type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+    type MsgBool = unsafe extern "C" fn(*mut c_void, *mut c_void) -> bool;
+    type Msg1Ptr = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
+
+    let msg0: Msg0 = std::mem::transmute(objc_msgSend as *const c_void);
+    let msg_bool: MsgBool = std::mem::transmute(objc_msgSend as *const c_void);
+    let msg1_ptr: Msg1Ptr = std::mem::transmute(objc_msgSend as *const c_void);
+
+    let ns_win = get_ns_window(window);
+    if !ns_win.is_null() {
+        msg1_ptr(
+            ns_win,
+            sel_registerName(c"orderOut:".as_ptr()),
+            std::ptr::null_mut(),
+        );
+    }
+
+    let ns_app_cls = objc_getClass(c"NSApplication".as_ptr());
+    if !ns_app_cls.is_null() {
+        let ns_app = msg0(ns_app_cls, sel_registerName(c"sharedApplication".as_ptr()));
+        if !ns_app.is_null() && msg_bool(ns_app, sel_registerName(c"isHidden".as_ptr())) {
+            let _ = msg0(ns_app, sel_registerName(c"unhideWithoutActivation".as_ptr()));
+        }
+    }
+    objc_autoreleasePoolPop(pool);
+}
+
+/// Restore `main_window`'s `ignoresMouseEvents`, opacity, and front key order when reopening it after hide.
+pub unsafe fn restore_main_nswindow_visible(window: &Window) {
+    let pool = objc_autoreleasePoolPush();
+    let ns_win = get_ns_window(window);
+    if !ns_win.is_null() {
+        type Msg1Bool = unsafe extern "C" fn(*mut c_void, *mut c_void, bool);
+        type Msg1F64 = unsafe extern "C" fn(*mut c_void, *mut c_void, f64);
+        type Msg1Ptr = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
+
+        let msg1_bool: Msg1Bool = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_f64: Msg1F64 = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_ptr: Msg1Ptr = std::mem::transmute(objc_msgSend as *const c_void);
+
+        msg1_bool(
+            ns_win,
+            sel_registerName(c"setIgnoresMouseEvents:".as_ptr()),
+            false,
+        );
+        msg1_f64(ns_win, sel_registerName(c"setAlphaValue:".as_ptr()), 1.0);
+        msg1_ptr(
+            ns_win,
+            sel_registerName(c"makeKeyAndOrderFront:".as_ptr()),
+            std::ptr::null_mut(),
+        );
+    }
+    objc_autoreleasePoolPop(pool);
+}
+
+/// Order a visible `NSWindow` behind other windows without hiding it.
+pub unsafe fn order_nswindow_back(window: &Window) {
+    if !window.is_visible().unwrap_or(false) {
+        return;
+    }
+    let pool = objc_autoreleasePoolPush();
+    let ns_win = get_ns_window(window);
+    if !ns_win.is_null() {
+        type Msg1Ptr = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
+        let msg1_ptr: Msg1Ptr = std::mem::transmute(objc_msgSend as *const c_void);
+        msg1_ptr(
+            ns_win,
+            sel_registerName(c"orderBack:".as_ptr()),
+            std::ptr::null_mut(),
+        );
+    }
+    objc_autoreleasePoolPop(pool);
 }
 
 /// Check if any of the given `Window`s is currently the active key window (`[ns_win isKeyWindow]`).
@@ -807,6 +922,180 @@ pub unsafe fn place_overlay_on_display(
         }
     }
     objc_autoreleasePoolPop(pool);
+}
+
+/// Position and resize a floating overlay `NSWindow` directly via Cocoa `[NSWindow setFrame:display:animate:]`
+/// (converting CoreGraphics top-left coordinates to Cocoa bottom-left coordinates),
+/// bypassing Winit's cross-monitor stale `scale_factor` conversion bug.
+pub unsafe fn place_floating_window_rect(
+    window: &Window,
+    cg_x: f64,
+    cg_y: f64,
+    width: f64,
+    height: f64,
+) {
+    let pool = objc_autoreleasePoolPush();
+    let ns_win = get_ns_window(window);
+    if !ns_win.is_null() {
+        type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+        type Msg0F64 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> f64;
+        type Msg1F64 = unsafe extern "C" fn(*mut c_void, *mut c_void, f64);
+        type MsgRect = unsafe extern "C" fn(*mut c_void, *mut c_void) -> CocoaRect;
+        type Msg1Rect = unsafe extern "C" fn(*mut c_void, *mut c_void, CocoaRect);
+        type MsgSetFrame =
+            unsafe extern "C" fn(*mut c_void, *mut c_void, CocoaRect, bool, bool);
+        type MsgCount = unsafe extern "C" fn(*mut c_void, *mut c_void) -> usize;
+        type MsgAtIndex =
+            unsafe extern "C" fn(*mut c_void, *mut c_void, usize) -> *mut c_void;
+
+        let msg0: Msg0 = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg0_f64: Msg0F64 = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_f64: Msg1F64 = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg_rect: MsgRect = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg1_rect: Msg1Rect = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg_set_frame: MsgSetFrame = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg_count: MsgCount = std::mem::transmute(objc_msgSend as *const c_void);
+        let msg_at_idx: MsgAtIndex = std::mem::transmute(objc_msgSend as *const c_void);
+
+        let mut primary_h = 1080.0_f64;
+        let ns_screen_cls = objc_getClass(c"NSScreen".as_ptr());
+        if !ns_screen_cls.is_null() {
+            let screens = msg0(ns_screen_cls, sel_registerName(c"screens".as_ptr()));
+            if !screens.is_null() && msg_count(screens, sel_registerName(c"count".as_ptr())) > 0 {
+                let primary = msg_at_idx(
+                    screens,
+                    sel_registerName(c"objectAtIndex:".as_ptr()),
+                    0,
+                );
+                if !primary.is_null() {
+                    let pf = msg_rect(primary, sel_registerName(c"frame".as_ptr()));
+                    if pf.size.height > 0.0 {
+                        primary_h = pf.size.height;
+                    }
+                }
+            }
+        }
+
+        let cocoa_x = cg_x;
+        let cocoa_y = primary_h - (cg_y + height);
+        let rect = CocoaRect {
+            origin: CocoaPoint {
+                x: cocoa_x,
+                y: cocoa_y,
+            },
+            size: CocoaSize { width, height },
+        };
+
+        let cur = msg_rect(ns_win, sel_registerName(c"frame".as_ptr()));
+        let needs_update = (cur.origin.x - rect.origin.x).abs() > 0.5
+            || (cur.origin.y - rect.origin.y).abs() > 0.5
+            || (cur.size.width - rect.size.width).abs() > 0.5
+            || (cur.size.height - rect.size.height).abs() > 0.5;
+        if needs_update {
+            msg_set_frame(
+                ns_win,
+                sel_registerName(c"setFrame:display:animate:".as_ptr()),
+                rect,
+                true,
+                false,
+            );
+        }
+
+        let content_view = msg0(ns_win, sel_registerName(c"contentView".as_ptr()));
+        if !content_view.is_null() {
+            let layer = msg0(content_view, sel_registerName(c"layer".as_ptr()));
+            if !layer.is_null() {
+                let bounds = msg_rect(content_view, sel_registerName(c"bounds".as_ptr()));
+                msg1_rect(layer, sel_registerName(c"setFrame:".as_ptr()), bounds);
+                let scale = msg0_f64(ns_win, sel_registerName(c"backingScaleFactor".as_ptr()));
+                if scale > 0.5 {
+                    msg1_f64(layer, sel_registerName(c"setContentsScale:".as_ptr()), scale);
+                }
+            }
+        }
+    }
+    objc_autoreleasePoolPop(pool);
+}
+
+/// Compute the top Y offset below the macOS Menu Bar for a given CoreGraphics display rect
+/// using `NSScreen.visibleFrame` (handling both Notch Retina displays and external monitors).
+pub unsafe fn get_display_menubar_offset_y(
+    disp_x: i32,
+    disp_y: i32,
+    disp_w: usize,
+    disp_h: usize,
+) -> f64 {
+    let pool = objc_autoreleasePoolPush();
+    let mut offset_y = 32.0_f64;
+
+    type Msg0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+    type MsgRect = unsafe extern "C" fn(*mut c_void, *mut c_void) -> CocoaRect;
+    type MsgCount = unsafe extern "C" fn(*mut c_void, *mut c_void) -> usize;
+    type MsgAtIndex = unsafe extern "C" fn(*mut c_void, *mut c_void, usize) -> *mut c_void;
+
+    let msg0: Msg0 = std::mem::transmute(objc_msgSend as *const c_void);
+    let msg_rect: MsgRect = std::mem::transmute(objc_msgSend as *const c_void);
+    let msg_count: MsgCount = std::mem::transmute(objc_msgSend as *const c_void);
+    let msg_at_idx: MsgAtIndex = std::mem::transmute(objc_msgSend as *const c_void);
+
+    let ns_screen_cls = objc_getClass(c"NSScreen".as_ptr());
+    if !ns_screen_cls.is_null() {
+        let screens = msg0(ns_screen_cls, sel_registerName(c"screens".as_ptr()));
+        if !screens.is_null() {
+            let count = msg_count(screens, sel_registerName(c"count".as_ptr()));
+            if count > 0 {
+                let primary = msg_at_idx(
+                    screens,
+                    sel_registerName(c"objectAtIndex:".as_ptr()),
+                    0,
+                );
+                if !primary.is_null() {
+                    let pf = msg_rect(primary, sel_registerName(c"frame".as_ptr()));
+                    let primary_h = pf.size.height;
+                    let target_x = disp_x as f64;
+                    let target_y = primary_h - (disp_y as f64 + disp_h as f64);
+                    let mut matched_screen = std::ptr::null_mut();
+
+                    for i in 0..count {
+                        let s = msg_at_idx(
+                            screens,
+                            sel_registerName(c"objectAtIndex:".as_ptr()),
+                            i,
+                        );
+                        if !s.is_null() {
+                            let f = msg_rect(s, sel_registerName(c"frame".as_ptr()));
+                            if (f.origin.x - target_x).abs() < 2.0
+                                && (f.origin.y - target_y).abs() < 2.0
+                                && (f.size.width - disp_w as f64).abs() < 2.0
+                            {
+                                matched_screen = s;
+                                break;
+                            }
+                        }
+                    }
+
+                    if matched_screen.is_null() {
+                        matched_screen =
+                            msg0(ns_screen_cls, sel_registerName(c"mainScreen".as_ptr()));
+                    }
+                    if matched_screen.is_null() {
+                        matched_screen = primary;
+                    }
+                    if !matched_screen.is_null() {
+                        let f = msg_rect(matched_screen, sel_registerName(c"frame".as_ptr()));
+                        let vf =
+                            msg_rect(matched_screen, sel_registerName(c"visibleFrame".as_ptr()));
+                        let top_inset = (f.origin.y + f.size.height)
+                            - (vf.origin.y + vf.size.height);
+                        offset_y = (top_inset + 4.0).clamp(28.0, 48.0);
+                    }
+                }
+            }
+        }
+    }
+
+    objc_autoreleasePoolPop(pool);
+    offset_y
 }
 
 /// Prepare a screenshot overlay window on the target display while keeping it visually transparent (`alpha = 0.004`)
@@ -1059,40 +1348,7 @@ pub unsafe fn focus_and_elevate_macos_window(
         }
     }
 
-    let ns_app_cls = objc_getClass(c"NSApplication".as_ptr());
-    if !ns_app_cls.is_null() {
-        let ns_app = msg0(ns_app_cls, sel_registerName(c"sharedApplication".as_ptr()));
-        if !ns_app.is_null() {
-            msg1_bool(
-                ns_app,
-                sel_registerName(c"activateIgnoringOtherApps:".as_ptr()),
-                true,
-            );
-        }
-    }
-
     objc_autoreleasePoolPop(pool);
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct CocoaPoint {
-    x: f64,
-    y: f64,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct CocoaSize {
-    width: f64,
-    height: f64,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct CocoaRect {
-    origin: CocoaPoint,
-    size: CocoaSize,
 }
 
 /// Directly snap a `tao::window::Window` using Cocoa `[NSWindow setFrame:display:animate:]`

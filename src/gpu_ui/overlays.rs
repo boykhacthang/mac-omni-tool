@@ -1,7 +1,8 @@
 use crate::events::AppUserEvent;
 use crate::gpu_ui::{
-    badge_pill, card_frame, danger_button, format_bytes, palette, primary_button, sanitize_ui_text,
-    secondary_button, sub_card_frame, thin_divider,
+    badge_pill, card_frame, danger_button, format_bytes, palette, primary_button,
+    quit_power_button, sanitize_ui_text, secondary_button, snap_rect_to_pixels, sub_card_frame,
+    thin_divider,
 };
 use crate::i18n::{
     is_light_theme, is_vi, set_lang, set_theme, tr, translate_audio_kind, translate_menubar_mode,
@@ -19,6 +20,60 @@ use std::time::{Duration, Instant};
 // ============================================================================
 // 1. Menu Bar Dropdown Popover (`mini_window` — Matching `ui/js/overlays/menubar-popover.js`)
 // ============================================================================
+
+fn smooth_borderless_button(
+    ui: &mut egui::Ui,
+    size: [f32; 2],
+    label: &str,
+    text_size: f32,
+    rounding: f32,
+    is_accent: bool,
+) -> egui::Response {
+    let p = palette();
+    let clean = sanitize_ui_text(label);
+    let galley = egui::WidgetText::from(RichText::new(clean).size(text_size).strong()).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Button,
+    );
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(size[0], size[1]), Sense::click());
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if ui.is_rect_visible(rect) {
+        let light = is_light_theme();
+        let active = resp.is_pointer_button_down_on();
+        let (fill, fg) = if is_accent {
+            let f = if active {
+                Color32::from_rgb(30, 64, 175)
+            } else if resp.hovered() {
+                if light {
+                    Color32::from_rgb(29, 78, 216)
+                } else {
+                    Color32::from_rgb(79, 146, 255)
+                }
+            } else {
+                p.accent
+            };
+            (f, Color32::WHITE)
+        } else if active || resp.hovered() {
+            (p.accent_soft, p.accent_text)
+        } else {
+            (p.bg_card_hover, p.text_primary)
+        };
+        let snapped = snap_rect_to_pixels(ui, rect);
+        ui.painter()
+            .rect_filled(snapped, Rounding::same(rounding), fill);
+        let text_pos = egui::pos2(
+            snapped.center().x - galley.size().x * 0.5,
+            snapped.center().y - galley.size().y * 0.5,
+        );
+        ui.painter()
+            .galley_with_override_text_color(text_pos, galley, fg);
+    }
+    resp
+}
 
 pub struct MiniPopoverState {
     pub display_state: core_display::DisplaySystemState,
@@ -522,59 +577,37 @@ impl MiniPopoverState {
                 // ------------------------------------------------------------
                 ui.columns(3, |cols| {
                     let w0 = cols[0].available_width();
-                    if cols[0]
-                        .add_sized(
-                            [w0, 27.0],
-                            egui::Button::new(
-                                RichText::new(tr("📸 Capture", "📸 Chụp vùng"))
-                                    .size(11.5)
-                                    .strong()
-                                    .color(p.text_primary),
-                            )
-                            .fill(p.bg_card_hover)
-                            .stroke(Stroke::new(1.0_f32, p.border))
-                            .rounding(Rounding::same(6.0)),
-                        )
-                        .clicked()
+                    if smooth_borderless_button(
+                        &mut cols[0],
+                        [w0, 27.0],
+                        tr("📸 Capture", "📸 Chụp vùng"),
+                        11.5,
+                        7.5,
+                        false,
+                    )
+                    .clicked()
                     {
                         let _ = proxy.send_event(AppUserEvent::SetMiniExpanded(false));
                         let _ = proxy.send_event(AppUserEvent::TriggerScreenshotOverlay);
                     }
 
                     let w1 = cols[1].available_width();
-                    if cols[1]
-                        .add_sized(
-                            [w1, 27.0],
-                            egui::Button::new(
-                                RichText::new("📋 Clipboard")
-                                    .size(11.5)
-                                    .strong()
-                                    .color(p.text_primary),
-                            )
-                            .fill(p.bg_card_hover)
-                            .stroke(Stroke::new(1.0_f32, p.border))
-                            .rounding(Rounding::same(6.0)),
-                        )
-                        .clicked()
+                    if smooth_borderless_button(
+                        &mut cols[1],
+                        [w1, 27.0],
+                        "📋 Clipboard",
+                        11.5,
+                        7.5,
+                        false,
+                    )
+                    .clicked()
                     {
                         let _ = proxy.send_event(AppUserEvent::SetMiniExpanded(false));
                         let _ = proxy.send_event(AppUserEvent::ToggleClipboardDrawer);
                     }
 
                     let w2 = cols[2].available_width();
-                    if cols[2]
-                        .add_sized(
-                            [w2, 27.0],
-                            egui::Button::new(
-                                RichText::new("🚀 F3")
-                                    .size(11.5)
-                                    .strong()
-                                    .color(p.text_primary),
-                            )
-                            .fill(p.bg_card_hover)
-                            .stroke(Stroke::new(1.0_f32, p.border))
-                            .rounding(Rounding::same(6.0)),
-                        )
+                    if smooth_borderless_button(&mut cols[2], [w2, 27.0], "🚀 F3", 11.5, 7.5, false)
                         .clicked()
                     {
                         let _ = proxy.send_event(AppUserEvent::SetMiniExpanded(false));
@@ -588,40 +621,23 @@ impl MiniPopoverState {
                 // 7. Footer: Open Main Dashboard (flex 1) + Quit App (⏻)
                 // ------------------------------------------------------------
                 ui.horizontal(|ui| {
-                    let quit_w = 34.0;
-                    let open_w = (ui.available_width() - quit_w - 6.0).max(160.0);
-                    if ui
-                        .add_sized(
-                            [open_w, 30.0],
-                            egui::Button::new(
-                                RichText::new(tr(
-                                    "🚀 Open Mac Omni Tool",
-                                    "🚀 Mở Bảng điều khiển (Dashboard)",
-                                ))
-                                .size(12.0)
-                                .strong()
-                                .color(Color32::WHITE),
-                            )
-                            .fill(p.accent)
-                            .stroke(Stroke::new(1.0_f32, p.accent))
-                            .rounding(Rounding::same(6.0)),
-                        )
-                        .clicked()
+                    let quit_w = 84.0;
+                    let open_w = (ui.available_width() - quit_w - 6.0).max(150.0);
+                    if smooth_borderless_button(
+                        ui,
+                        [open_w, 30.0],
+                        tr("🚀 Open Dashboard", "🚀 Mở Bảng điều khiển"),
+                        12.0,
+                        8.0,
+                        true,
+                    )
+                    .clicked()
                     {
                         let _ = proxy.send_event(AppUserEvent::SetMiniExpanded(false));
                         let _ = proxy.send_event(AppUserEvent::ShowLauncher);
                     }
 
-                    if ui
-                        .add_sized(
-                            [quit_w, 30.0],
-                            egui::Button::new(
-                                RichText::new("⊗").size(14.0).strong().color(p.danger),
-                            )
-                            .fill(p.danger_soft)
-                            .stroke(Stroke::new(1.0_f32, p.danger))
-                            .rounding(Rounding::same(6.0)),
-                        )
+                    if quit_power_button(ui, egui::vec2(quit_w, 30.0), tr("Quit", "Thoát"))
                         .on_hover_text(tr("Quit Mac Omni Tool", "Thoát hoàn toàn ứng dụng"))
                         .clicked()
                     {
@@ -773,10 +789,16 @@ impl ClipboardDrawerState {
                         p.accent_soft,
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if secondary_button(ui, "✕").clicked() {
+                        if secondary_button(ui, "✕")
+                            .on_hover_text(tr("Close (Esc)", "Đóng (Esc)"))
+                            .clicked()
+                        {
                             let _ = proxy.send_event(AppUserEvent::HideClipboardDrawer);
                         }
-                        if danger_button(ui, tr("Clear", "Xóa")).clicked() {
+                        if danger_button(ui, tr("🗑 Clear", "🗑 Xóa"))
+                            .on_hover_text(tr("Clear all unpinned items", "Xóa tất cả mục chưa ghim"))
+                            .clicked()
+                        {
                             let _ = core_clipboard::clear_unpinned_clipboard_items();
                             self.image_textures.clear();
                             self.reload();
@@ -898,7 +920,13 @@ impl ClipboardDrawerState {
                                             ui.with_layout(
                                                 egui::Layout::right_to_left(egui::Align::Center),
                                                 |ui| {
-                                                    if danger_button(ui, "🗑").clicked() {
+                                                    if danger_button(ui, "🗑")
+                                                        .on_hover_text(tr(
+                                                            "Delete item",
+                                                            "Xóa mục này",
+                                                        ))
+                                                        .clicked()
+                                                    {
                                                         action_delete = Some(item.id);
                                                     }
                                                     let pin_lbl =

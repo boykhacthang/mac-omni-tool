@@ -38,9 +38,9 @@ cat > "$APP_DIR/Contents/Info.plist" << 'EOF'
     <key>CFBundleIdentifier</key>
     <string>com.khacthang.mac-omni-tool</string>
     <key>CFBundleVersion</key>
-    <string>2.3.2</string>
+    <string>2.3.3</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.3.2</string>
+    <string>2.3.3</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 boykhacthang • MIT License • github.com/boykhacthang/mac-omni-tool</string>
     <key>CFBundlePackageType</key>
@@ -76,9 +76,6 @@ codesign --force --deep --sign "$SIGN_ID" \
     "$APP_DIR" 2>/dev/null || true
 
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-if [[ -x "$LSREGISTER" ]]; then
-    "$LSREGISTER" -f "$(pwd)/$APP_DIR" 2>/dev/null || true
-fi
 
 # Nếu đã cài trong /Applications/MacOmniTool.app, cập nhật trực tiếp tại chỗ (in-place bằng ditto)
 # thay vì xóa đi để giữ nguyên Inode & quyền TCC của hệ thống.
@@ -89,8 +86,11 @@ if [[ -d "/Applications/MacOmniTool.app" ]]; then
         -r='designated => identifier "com.khacthang.mac-omni-tool"' \
         "/Applications/MacOmniTool.app" 2>/dev/null || true
     if [[ -x "$LSREGISTER" ]]; then
+        "$LSREGISTER" -u "$(pwd)/$APP_DIR" 2>/dev/null || true
         "$LSREGISTER" -f "/Applications/MacOmniTool.app" 2>/dev/null || true
     fi
+elif [[ -x "$LSREGISTER" ]]; then
+    "$LSREGISTER" -f "$(pwd)/$APP_DIR" 2>/dev/null || true
 fi
 
 if [[ "$1" == "--reset-tcc" ]]; then

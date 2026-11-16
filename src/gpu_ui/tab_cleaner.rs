@@ -1,8 +1,8 @@
 use crate::gpu_ui::dashboard::{CleanerConfirmAction, CleanerSubTab, DashboardState};
 use crate::gpu_ui::{
-    badge_pill, card_frame, danger_button, format_bytes, palette, path_action_cell,
-    pill_tab_button, pill_tabs_frame, primary_button, progress_bar_styled, secondary_button,
-    setting_row_split, shorten_middle, sub_card_frame, thin_divider, tip_badge,
+    badge_pill, card_frame, danger_button, danger_button_enabled, format_bytes, palette,
+    path_action_cell, pill_tab_button, pill_tabs_frame, primary_button, progress_bar_styled,
+    secondary_button, setting_row_split, shorten_middle, sub_card_frame, thin_divider, tip_badge,
     truncated_name_label,
 };
 use crate::i18n::{tr, translate_cleaner_category, translate_scan_message};
@@ -248,24 +248,16 @@ impl DashboardState {
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
-                                        if ui
-                                            .add_enabled(
-                                                junk.trash.item_count > 0,
-                                                egui::Button::new(
-                                                    RichText::new(format!(
-                                                        "🔥 {} ({:.1} MB)",
-                                                        tr("Empty Trash Now", "Đổ Thùng rác ngay"),
-                                                        junk.trash.total_size_mb
-                                                    ))
-                                                    .size(12.0)
-                                                    .strong()
-                                                    .color(p.danger),
-                                                )
-                                                .fill(p.danger_soft)
-                                                .stroke(Stroke::new(1.0_f32, p.danger))
-                                                .rounding(Rounding::same(6.0)),
-                                            )
-                                            .clicked()
+                                        if danger_button_enabled(
+                                            ui,
+                                            junk.trash.item_count > 0,
+                                            &format!(
+                                                "🗑 {} ({:.1} MB)",
+                                                tr("Empty Trash Now", "Đổ Thùng rác ngay"),
+                                                junk.trash.total_size_mb
+                                            ),
+                                        )
+                                        .clicked()
                                         {
                                             self.cleaner_confirm_action =
                                                 Some(CleanerConfirmAction::EmptyTrash {
@@ -990,8 +982,11 @@ impl DashboardState {
                 if !self.orphans.is_empty() {
                     egui::Frame::none()
                         .fill(p.bg_card)
-                        .stroke(Stroke::new(1.2_f32, p.danger))
-                        .rounding(Rounding::same(10.0))
+                        .stroke(Stroke::new(
+                            1.0_f32,
+                            egui::Color32::from_rgba_unmultiplied(220, 38, 38, 120),
+                        ))
+                        .rounding(Rounding::same(12.0))
                         .inner_margin(Margin::symmetric(14.0, 10.0))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
@@ -1617,7 +1612,10 @@ impl DashboardState {
             .frame(
                 egui::Frame::none()
                     .fill(p.bg_card)
-                    .stroke(Stroke::new(1.5_f32, p.danger))
+                    .stroke(Stroke::new(
+                        1.0_f32,
+                        egui::Color32::from_rgba_unmultiplied(220, 38, 38, 120),
+                    ))
                     .rounding(Rounding::same(12.0))
                     .inner_margin(Margin::symmetric(18.0, 16.0)),
             )

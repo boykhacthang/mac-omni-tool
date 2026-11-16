@@ -19,28 +19,48 @@ use crate::gpu_ui::{
 };
 use crate::i18n::{init_ui_prefs, set_lang, set_theme, tr};
 use crate::macos_window::{
-    disable_macos_window_restoration, focus_and_elevate_macos_window,
-    hide_floating_overlay_window, park_overlay_window_offscreen,
-    place_main_window_center_75_full_height, place_overlay_on_display,
-    prepare_screenshot_window_hidden, release_process_heap_memory, restore_previous_frontmost_app,
-    reveal_screenshot_window, set_macos_dock_icon_visible, set_nswindow_non_restorable,
-    set_nswindow_rounded_transparent, show_floating_overlay_window, snap_nswindow_directly,
+    disable_macos_window_restoration, enable_overlay_accepts_first_mouse,
+    focus_and_elevate_macos_window, get_display_menubar_offset_y, hide_floating_overlay_window,
+    hide_main_nswindow_and_unhide_app, order_nswindow_back, park_overlay_window_offscreen,
+    place_floating_window_rect, place_main_window_center_75_full_height, place_overlay_on_display,
+    prepare_screenshot_window_hidden, reassert_overlay_key_focus, release_process_heap_memory,
+    restore_main_nswindow_visible, restore_previous_frontmost_app, reveal_screenshot_window,
+    set_macos_dock_icon_visible, set_nswindow_non_restorable, set_nswindow_rounded_transparent,
+    show_floating_overlay_window, snap_nswindow_directly,
 };
 use crate::menubar::{
-    init_native_macos_menubar_item, setup_macos_application_menu, update_status_bar_title,
+    init_native_macos_menubar_item, set_outside_click_monitor_active, setup_macos_application_menu,
+    suppress_reopen_for_ms, update_status_bar_title,
 };
 use crate::single_instance::ensure_single_instance;
 
 use egui_winit::winit::{
     application::ApplicationHandler,
     dpi::{LogicalPosition, LogicalSize},
-    event::WindowEvent,
+    event::{ElementState, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
     window::{Window, WindowAttributes, WindowId, WindowLevel},
 };
 use std::sync::Arc;
 
 static LAST_MAIN_HEARTBEAT_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// Suppress a follow-up `ToggleMenuBarPopover` (dispatched on `MouseUp` from the Menu Bar icon)
+/// if `mini_window` was just auto-hidden on `MouseDown` (outside-click or focus loss) at the same
+/// status-item coordinates within a normal click-and-hold window, preventing blink-reopen.
+fn should_suppress_toggle_after_auto_hide(
+    auto_hide: Option<(std::time::Instant, (f64, f64))>,
+    now_instant: std::time::Instant,
+    click_pos: (f64, f64),
+) -> bool {
+    let Some((hide_instant, (hx, hy))) = auto_hide else {
+        return false;
+    };
+    let elapsed = now_instant.saturating_duration_since(hide_instant);
+    let near_same_spot = (click_pos.0 - hx).abs() <= 36.0 && (click_pos.1 - hy).abs() <= 36.0;
+    elapsed < std::time::Duration::from_millis(120)
+        || (near_same_spot && elapsed < std::time::Duration::from_millis(1500))
+}
 
 struct OmniGpuApp {
     start_minimized: bool,
@@ -67,6 +87,9 @@ struct OmniGpuApp {
     alttab_w: f64,
     alttab_h: f64,
     next_repaint_deadline: Option<std::time::Instant>,
+    last_mini_auto_hide: Option<(std::time::Instant, (f64, f64))>,
+    last_mini_show_instant: Option<std::time::Instant>,
+    mini_prev_frontmost_pid: i32,
 }
 
 impl OmniGpuApp {
@@ -78,7 +101,7 @@ impl OmniGpuApp {
         let mini_h = 430.0;
         let mini_pos = (
             cur_disp.x as f64 + (cur_disp.width as f64 - (mini_w + 16.0)).max(20.0),
-            cur_disp.y as f64 + 28.0,
+            cur_disp.y as f64 + 32.0,
         );
 
         Self {
@@ -101,6 +124,9 @@ impl OmniGpuApp {
             alttab_w: 920.0,
             alttab_h: 520.0,
             next_repaint_deadline: None,
+            last_mini_auto_hide: None,
+            last_mini_show_instant: None,
+            mini_prev_frontmost_pid: 0,
         }
     }
 
@@ -172,6 +198,9 @@ impl OmniGpuApp {
         unsafe {
             set_nswindow_non_restorable(&main_win);
             place_main_window_center_75_full_height(&main_win);
+            if self.start_minimized {
+                hide_main_nswindow_and_unhide_app(&main_win);
+            }
             set_macos_dock_icon_visible(!self.start_minimized);
             setup_macos_application_menu();
         }
@@ -199,6 +228,7 @@ impl OmniGpuApp {
         );
         unsafe {
             set_nswindow_rounded_transparent(&mini_win, 14.0);
+            enable_overlay_accepts_first_mouse(&mini_win);
             hide_floating_overlay_window(&mini_win);
         }
         self.mini_surface = Some(WindowGpuSurface::new(&self.gpu, mini_win, true, false));
@@ -224,6 +254,7 @@ impl OmniGpuApp {
         );
         unsafe {
             set_nswindow_rounded_transparent(&clip_win, 14.0);
+            enable_overlay_accepts_first_mouse(&clip_win);
             hide_floating_overlay_window(&clip_win);
         }
         self.clip_surface = Some(WindowGpuSurface::new(&self.gpu, clip_win, true, false));
@@ -277,16 +308,73 @@ impl OmniGpuApp {
             .any(|s| s.surface.is_some() || s.window.is_visible().unwrap_or(false))
     }
 
-    fn hide_mini_popover(&mut self) {
-        if let Some(mini) = &mut self.mini_surface {
-            if mini.window.is_visible().unwrap_or(false) {
-                unsafe {
-                    hide_floating_overlay_window(&mini.window);
-                }
-                mini.suspend_surface(&self.gpu);
-                self.mini_ui.on_hidden();
-            }
+    fn all_surfaces_suspended(&self) -> bool {
+        let main_none = self
+            .main_surface
+            .as_ref()
+            .map(|s| s.surface.is_none())
+            .unwrap_or(true);
+        let mini_none = self
+            .mini_surface
+            .as_ref()
+            .map(|s| s.surface.is_none())
+            .unwrap_or(true);
+        let clip_none = self
+            .clip_surface
+            .as_ref()
+            .map(|s| s.surface.is_none())
+            .unwrap_or(true);
+        let alttab_none = self
+            .alttab_surface
+            .as_ref()
+            .map(|s| s.surface.is_none())
+            .unwrap_or(true);
+        let shot_none = self.screenshot_surfaces.iter().all(|s| s.surface.is_none());
+        main_none && mini_none && clip_none && alttab_none && shot_none
+    }
+
+    fn sync_overlay_monitors(&self) {
+        let mini_vis = self
+            .mini_surface
+            .as_ref()
+            .and_then(|s| s.window.is_visible())
+            .unwrap_or(false);
+        let clip_vis = self
+            .clip_surface
+            .as_ref()
+            .and_then(|s| s.window.is_visible())
+            .unwrap_or(false);
+        let alttab_vis = self
+            .alttab_surface
+            .as_ref()
+            .and_then(|s| s.window.is_visible())
+            .unwrap_or(false);
+        let shot_vis = self.any_screenshot_visible();
+        core_input::set_overlay_escape_hotkey_active(
+            mini_vis || clip_vis || alttab_vis || shot_vis,
+        );
+        set_outside_click_monitor_active(mini_vis || clip_vis);
+    }
+
+    fn hide_mini_popover(&mut self) -> bool {
+        let Some(mini) = &mut self.mini_surface else {
+            return false;
+        };
+        if !mini.window.is_visible().unwrap_or(false) {
+            return false;
         }
+        self.last_mini_show_instant = None;
+        self.last_mini_auto_hide = None;
+        unsafe {
+            hide_floating_overlay_window(&mini.window);
+        }
+        mini.suspend_surface(&self.gpu, false);
+        self.mini_ui.on_hidden();
+        if self.all_surfaces_suspended() {
+            self.gpu.trim_command_queue();
+        }
+        self.sync_overlay_monitors();
+        true
     }
 
     fn hide_clipboard_drawer(&mut self) {
@@ -295,18 +383,14 @@ impl OmniGpuApp {
                 unsafe {
                     hide_floating_overlay_window(&clip.window);
                 }
-                clip.suspend_surface(&self.gpu);
+                clip.suspend_surface(&self.gpu, false);
                 self.clip_ui.on_hidden();
             }
         }
-        let alttab_vis = self
-            .alttab_surface
-            .as_ref()
-            .and_then(|s| s.window.is_visible())
-            .unwrap_or(false);
-        if !alttab_vis && !self.any_screenshot_visible() {
-            core_input::set_overlay_escape_hotkey_active(false);
+        if self.all_surfaces_suspended() {
+            self.gpu.trim_command_queue();
         }
+        self.sync_overlay_monitors();
     }
 
     fn hide_alttab_overlay(&mut self) {
@@ -315,18 +399,14 @@ impl OmniGpuApp {
                 unsafe {
                     hide_floating_overlay_window(&alttab.window);
                 }
-                alttab.suspend_surface(&self.gpu);
+                alttab.suspend_surface(&self.gpu, false);
                 self.alttab_ui.on_hidden();
             }
         }
-        let clip_vis = self
-            .clip_surface
-            .as_ref()
-            .and_then(|s| s.window.is_visible())
-            .unwrap_or(false);
-        if !clip_vis && !self.any_screenshot_visible() {
-            core_input::set_overlay_escape_hotkey_active(false);
+        if self.all_surfaces_suspended() {
+            self.gpu.trim_command_queue();
         }
+        self.sync_overlay_monitors();
     }
 
     fn hide_screenshot_overlays(&mut self) {
@@ -346,11 +426,14 @@ impl OmniGpuApp {
                 unsafe {
                     park_overlay_window_offscreen(&surf.window);
                 }
-                surf.suspend_surface(&self.gpu);
+                surf.suspend_surface(&self.gpu, false);
             }
         }
         self.screenshot_surfaces.clear();
         self.screenshot_ui.clear_all();
+        if self.all_surfaces_suspended() {
+            self.gpu.trim_command_queue();
+        }
         if any_vis {
             if let Some(main) = &self.main_surface {
                 unsafe {
@@ -359,28 +442,20 @@ impl OmniGpuApp {
             }
             release_process_heap_memory();
         }
-        let clip_vis = self
-            .clip_surface
-            .as_ref()
-            .and_then(|s| s.window.is_visible())
-            .unwrap_or(false);
-        let alttab_vis = self
-            .alttab_surface
-            .as_ref()
-            .and_then(|s| s.window.is_visible())
-            .unwrap_or(false);
-        if !clip_vis && !alttab_vis {
-            core_input::set_overlay_escape_hotkey_active(false);
-        }
+        self.sync_overlay_monitors();
     }
 
     fn show_main_dashboard(&mut self) {
+        self.hide_mini_popover();
+        let mut delay = std::time::Duration::MAX;
         if let Some(main) = &mut self.main_surface {
+            main.window.set_minimized(false);
             unsafe {
                 set_macos_dock_icon_visible(true);
                 if !main.window.is_visible().unwrap_or(false) {
                     place_main_window_center_75_full_height(&main.window);
                 }
+                restore_main_nswindow_visible(&main.window);
                 setup_macos_application_menu();
             }
             core_input::register_native_carbon_hotkeys();
@@ -388,20 +463,32 @@ impl OmniGpuApp {
             main.window.set_visible(true);
             main.window.focus_window();
             self.dashboard_ui.on_focused();
+            let proxy = self.proxy.clone();
+            let ui_state = &mut self.dashboard_ui;
+            delay = main.render_frame(&self.gpu, [0.06, 0.09, 0.16, 1.0], |ctx| {
+                ui_state.render(ctx, &proxy);
+            });
             main.window.request_redraw();
         }
+        self.record_repaint_delay(delay);
     }
 
     fn hide_main_dashboard(&mut self) {
         if let Some(main) = &mut self.main_surface {
             main.window.set_visible(false);
-            main.suspend_surface(&self.gpu);
+            unsafe {
+                hide_main_nswindow_and_unhide_app(&main.window);
+            }
+            main.suspend_surface(&self.gpu, false);
             unsafe {
                 set_macos_dock_icon_visible(false);
             }
             core_input::register_native_carbon_hotkeys();
             self.dashboard_ui.on_hidden();
             release_process_heap_memory();
+        }
+        if self.all_surfaces_suspended() {
+            self.gpu.trim_command_queue();
         }
     }
 
@@ -447,9 +534,27 @@ impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
 
         match user_ev {
             AppUserEvent::ToggleMenuBarPopover => {
+                suppress_reopen_for_ms(1000);
                 let cfg = core_input::get_input_config();
                 if !cfg.menubar_enabled || cfg.menubar_display_mode == "hidden" {
                     self.hide_mini_popover();
+                    return;
+                }
+                let click_pos = core_display::get_mouse_cursor_position();
+                let auto_hide = self.last_mini_auto_hide.take();
+                if should_suppress_toggle_after_auto_hide(
+                    auto_hide,
+                    std::time::Instant::now(),
+                    click_pos,
+                ) {
+                    let prev_pid = std::mem::replace(&mut self.mini_prev_frontmost_pid, 0);
+                    if prev_pid > 0 {
+                        if let Some(main) = &self.main_surface {
+                            unsafe {
+                                restore_previous_frontmost_app(&main.window, prev_pid);
+                            }
+                        }
+                    }
                     return;
                 }
                 let is_vis = self
@@ -458,40 +563,104 @@ impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
                     .and_then(|s| s.window.is_visible())
                     .unwrap_or(false);
                 if is_vis {
+                    let prev_pid = std::mem::replace(&mut self.mini_prev_frontmost_pid, 0);
                     self.hide_mini_popover();
+                    if prev_pid > 0 {
+                        if let Some(main) = &self.main_surface {
+                            unsafe {
+                                restore_previous_frontmost_app(&main.window, prev_pid);
+                            }
+                        }
+                    }
                 } else {
-                    let (mx, _my) = core_display::get_mouse_cursor_position();
+                    self.hide_clipboard_drawer();
+                    self.hide_alttab_overlay();
+                    let my_pid = std::process::id() as i32;
+                    let prev_pid = core_window::frontmost_application_pid();
+                    self.mini_prev_frontmost_pid = prev_pid;
+
+                    let (mx, _my) = click_pos;
                     let disp = core_display::get_display_at_mouse_cursor();
                     let min_x = disp.x as f64 + 12.0;
                     let max_x =
                         (disp.x as f64 + disp.width as f64 - (self.mini_w + 12.0)).max(min_x);
                     let px = (mx - (self.mini_w / 2.0)).clamp(min_x, max_x);
-                    let py = disp.y as f64 + 28.0;
+                    let py = disp.y as f64
+                        + unsafe {
+                            get_display_menubar_offset_y(disp.x, disp.y, disp.width, disp.height)
+                        };
                     self.mini_pos = (px, py);
                     self.mini_ui.refresh_now();
+                    let mut delay = std::time::Duration::MAX;
+                    let mut opened = false;
                     if let Some(mini) = &mut self.mini_surface {
-                        let _ = mini
-                            .window
-                            .request_inner_size(LogicalSize::new(self.mini_w, self.mini_h));
-                        mini.window
-                            .set_outer_position(LogicalPosition::new(px, py));
+                        unsafe {
+                            place_floating_window_rect(
+                                &mini.window,
+                                px,
+                                py,
+                                self.mini_w,
+                                self.mini_h,
+                            );
+                        }
                         mini.ensure_surface(&self.gpu);
+                        let proxy = self.proxy.clone();
+                        let ui_state = &mut self.mini_ui;
+                        delay = mini.render_frame(&self.gpu, [0.0, 0.0, 0.0, 0.0], |ctx| {
+                            ui_state.render(ctx, &proxy);
+                        });
                         unsafe {
                             show_floating_overlay_window(&mini.window, 14.0);
                         }
+                        if prev_pid > 0 && prev_pid != my_pid {
+                            if let Some(main) = &self.main_surface {
+                                unsafe {
+                                    order_nswindow_back(&main.window);
+                                }
+                            }
+                        }
                         mini.window.request_redraw();
+                        opened = true;
+                    }
+                    if opened {
+                        self.last_mini_show_instant = Some(std::time::Instant::now());
+                        self.record_repaint_delay(delay);
+                        self.sync_overlay_monitors();
                     }
                 }
             }
             AppUserEvent::SetMiniExpanded(expanded) => {
                 if expanded {
+                    suppress_reopen_for_ms(1000);
                     self.mini_ui.refresh_now();
+                    let mut delay = std::time::Duration::MAX;
+                    let mut opened = false;
                     if let Some(mini) = &mut self.mini_surface {
+                        unsafe {
+                            place_floating_window_rect(
+                                &mini.window,
+                                self.mini_pos.0,
+                                self.mini_pos.1,
+                                self.mini_w,
+                                self.mini_h,
+                            );
+                        }
                         mini.ensure_surface(&self.gpu);
+                        let proxy = self.proxy.clone();
+                        let ui_state = &mut self.mini_ui;
+                        delay = mini.render_frame(&self.gpu, [0.0, 0.0, 0.0, 0.0], |ctx| {
+                            ui_state.render(ctx, &proxy);
+                        });
                         unsafe {
                             show_floating_overlay_window(&mini.window, 14.0);
                         }
                         mini.window.request_redraw();
+                        opened = true;
+                    }
+                    if opened {
+                        self.last_mini_show_instant = Some(std::time::Instant::now());
+                        self.record_repaint_delay(delay);
+                        self.sync_overlay_monitors();
                     }
                 } else {
                     self.hide_mini_popover();
@@ -501,18 +670,33 @@ impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
                 let clamped_h = h.clamp(310.0, 640.0).round();
                 if (clamped_h - self.mini_h).abs() > 1.0 {
                     self.mini_h = clamped_h;
+                    let mut delay = std::time::Duration::MAX;
+                    let mut rendered = false;
                     if let Some(mini) = &mut self.mini_surface {
-                        let _ = mini
-                            .window
-                            .request_inner_size(LogicalSize::new(self.mini_w, self.mini_h));
-                        mini.window.set_outer_position(LogicalPosition::new(
-                            self.mini_pos.0,
-                            self.mini_pos.1,
-                        ));
-                        unsafe {
-                            set_nswindow_rounded_transparent(&mini.window, 14.0);
+                        if mini.window.is_visible().unwrap_or(false) && mini.surface.is_some() {
+                            unsafe {
+                                place_floating_window_rect(
+                                    &mini.window,
+                                    self.mini_pos.0,
+                                    self.mini_pos.1,
+                                    self.mini_w,
+                                    self.mini_h,
+                                );
+                                set_nswindow_rounded_transparent(&mini.window, 14.0);
+                            }
+                            let sz = mini.window.inner_size();
+                            mini.resize(&self.gpu, sz.width, sz.height);
+                            let proxy = self.proxy.clone();
+                            let ui_state = &mut self.mini_ui;
+                            delay = mini.render_frame(&self.gpu, [0.0, 0.0, 0.0, 0.0], |ctx| {
+                                ui_state.render(ctx, &proxy);
+                            });
+                            mini.window.request_redraw();
+                            rendered = true;
                         }
-                        mini.window.request_redraw();
+                    }
+                    if rendered {
+                        self.record_repaint_delay(delay);
                     }
                 }
             }
@@ -575,6 +759,52 @@ impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
             AppUserEvent::HideLauncher => {
                 self.hide_main_dashboard();
             }
+            AppUserEvent::MacAppDidHide => {
+                self.hide_mini_popover();
+                self.hide_clipboard_drawer();
+                self.hide_alttab_overlay();
+                if core_input::get_input_config().keep_running_in_background {
+                    self.hide_main_dashboard();
+                } else if let Some(main) = &mut self.main_surface {
+                    main.window.set_visible(false);
+                    unsafe {
+                        hide_main_nswindow_and_unhide_app(&main.window);
+                    }
+                    main.suspend_surface(&self.gpu, false);
+                    self.dashboard_ui.on_hidden();
+                    release_process_heap_memory();
+                }
+                if self.all_surfaces_suspended() {
+                    self.gpu.trim_command_queue();
+                }
+                self.sync_overlay_monitors();
+            }
+            AppUserEvent::GlobalMouseDownOutsideApp => {
+                let (mx, my) = core_display::get_mouse_cursor_position();
+                let mini_vis = self
+                    .mini_surface
+                    .as_ref()
+                    .and_then(|s| s.window.is_visible())
+                    .unwrap_or(false);
+                if mini_vis
+                    && (mx < self.mini_pos.0 - 4.0
+                        || mx > self.mini_pos.0 + self.mini_w + 4.0
+                        || my < self.mini_pos.1 - 4.0
+                        || my > self.mini_pos.1 + self.mini_h + 4.0)
+                {
+                    if self.hide_mini_popover() {
+                        self.last_mini_auto_hide = Some((std::time::Instant::now(), (mx, my)));
+                    }
+                }
+                let clip_vis = self
+                    .clip_surface
+                    .as_ref()
+                    .and_then(|s| s.window.is_visible())
+                    .unwrap_or(false);
+                if clip_vis {
+                    self.hide_clipboard_drawer();
+                }
+            }
             AppUserEvent::QuitApp => {
                 event_loop.exit();
             }
@@ -591,21 +821,46 @@ impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
                 if is_vis {
                     self.hide_clipboard_drawer();
                 } else {
+                    suppress_reopen_for_ms(1000);
+                    let my_pid = std::process::id() as i32;
+                    let prev_pid = core_window::frontmost_application_pid();
                     let disp = core_display::get_display_at_mouse_cursor();
                     let h = (disp.height as f64 - 84.0).clamp(520.0, 900.0);
+                    let cx = disp.x as f64 + 12.0;
+                    let cy = disp.y as f64
+                        + unsafe {
+                            get_display_menubar_offset_y(disp.x, disp.y, disp.width, disp.height)
+                        }
+                        + 6.0;
                     self.clip_ui.on_shown();
+                    let mut delay = std::time::Duration::MAX;
+                    let mut opened = false;
                     if let Some(clip) = &mut self.clip_surface {
-                        let _ = clip.window.request_inner_size(LogicalSize::new(450.0, h));
-                        clip.window.set_outer_position(LogicalPosition::new(
-                            disp.x as f64 + 12.0,
-                            disp.y as f64 + 38.0,
-                        ));
+                        unsafe {
+                            place_floating_window_rect(&clip.window, cx, cy, 450.0, h);
+                        }
                         clip.ensure_surface(&self.gpu);
                         unsafe {
                             show_floating_overlay_window(&clip.window, 14.0);
                         }
-                        core_input::set_overlay_escape_hotkey_active(true);
+                        let proxy = self.proxy.clone();
+                        let ui_state = &mut self.clip_ui;
+                        delay = clip.render_frame(&self.gpu, [0.0, 0.0, 0.0, 0.0], |ctx| {
+                            ui_state.render(ctx, &proxy);
+                        });
+                        if prev_pid > 0 && prev_pid != my_pid {
+                            if let Some(main) = &self.main_surface {
+                                unsafe {
+                                    order_nswindow_back(&main.window);
+                                }
+                            }
+                        }
                         clip.window.request_redraw();
+                        opened = true;
+                    }
+                    if opened {
+                        self.record_repaint_delay(delay);
+                        self.sync_overlay_monitors();
                     }
                 }
             }
@@ -630,20 +885,47 @@ impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
                         alttab.window.request_redraw();
                     }
                 } else {
+                    suppress_reopen_for_ms(1000);
+                    let my_pid = std::process::id() as i32;
+                    let prev_pid = core_window::frontmost_application_pid();
                     let disp = core_display::get_display_at_mouse_cursor();
                     let ax = disp.x as f64 + ((disp.width as f64 - self.alttab_w) / 2.0).max(20.0);
                     let ay = disp.y as f64 + ((disp.height as f64 - self.alttab_h) / 2.0).max(20.0);
                     self.alttab_ui.refresh_on_open();
+                    let mut delay = std::time::Duration::MAX;
+                    let mut opened = false;
                     if let Some(alttab) = &mut self.alttab_surface {
-                        alttab
-                            .window
-                            .set_outer_position(LogicalPosition::new(ax, ay));
+                        unsafe {
+                            place_floating_window_rect(
+                                &alttab.window,
+                                ax,
+                                ay,
+                                self.alttab_w,
+                                self.alttab_h,
+                            );
+                        }
                         alttab.ensure_surface(&self.gpu);
                         unsafe {
                             show_floating_overlay_window(&alttab.window, 14.0);
                         }
-                        core_input::set_overlay_escape_hotkey_active(true);
+                        let proxy = self.proxy.clone();
+                        let ui_state = &mut self.alttab_ui;
+                        delay = alttab.render_frame(&self.gpu, [0.0, 0.0, 0.0, 0.0], |ctx| {
+                            ui_state.render(ctx, &proxy);
+                        });
+                        if prev_pid > 0 && prev_pid != my_pid {
+                            if let Some(main) = &self.main_surface {
+                                unsafe {
+                                    order_nswindow_back(&main.window);
+                                }
+                            }
+                        }
                         alttab.window.request_redraw();
+                        opened = true;
+                    }
+                    if opened {
+                        self.record_repaint_delay(delay);
+                        self.sync_overlay_monitors();
                     }
                 }
             }
@@ -1064,27 +1346,37 @@ impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
                 if Some(window_id) == main_id {
                     if let Some(surf) = &mut self.main_surface {
                         surf.resize(&self.gpu, new_size.width, new_size.height);
-                        surf.window.request_redraw();
+                        if surf.surface.is_some() {
+                            surf.window.request_redraw();
+                        }
                     }
                 } else if Some(window_id) == mini_id {
                     if let Some(surf) = &mut self.mini_surface {
                         surf.resize(&self.gpu, new_size.width, new_size.height);
-                        surf.window.request_redraw();
+                        if surf.surface.is_some() {
+                            surf.window.request_redraw();
+                        }
                     }
                 } else if Some(window_id) == clip_id {
                     if let Some(surf) = &mut self.clip_surface {
                         surf.resize(&self.gpu, new_size.width, new_size.height);
-                        surf.window.request_redraw();
+                        if surf.surface.is_some() {
+                            surf.window.request_redraw();
+                        }
                     }
                 } else if Some(window_id) == alttab_id {
                     if let Some(surf) = &mut self.alttab_surface {
                         surf.resize(&self.gpu, new_size.width, new_size.height);
-                        surf.window.request_redraw();
+                        if surf.surface.is_some() {
+                            surf.window.request_redraw();
+                        }
                     }
                 } else if let Some(idx) = screenshot_idx {
                     if let Some(surf) = self.screenshot_surfaces.get_mut(idx) {
                         surf.resize(&self.gpu, new_size.width, new_size.height);
-                        surf.window.request_redraw();
+                        if surf.surface.is_some() {
+                            surf.window.request_redraw();
+                        }
                     }
                 }
             }
@@ -1093,31 +1385,41 @@ impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
                     if let Some(surf) = &mut self.main_surface {
                         let sz = surf.window.inner_size();
                         surf.resize(&self.gpu, sz.width, sz.height);
-                        surf.window.request_redraw();
+                        if surf.surface.is_some() {
+                            surf.window.request_redraw();
+                        }
                     }
                 } else if Some(window_id) == mini_id {
                     if let Some(surf) = &mut self.mini_surface {
                         let sz = surf.window.inner_size();
                         surf.resize(&self.gpu, sz.width, sz.height);
-                        surf.window.request_redraw();
+                        if surf.surface.is_some() {
+                            surf.window.request_redraw();
+                        }
                     }
                 } else if Some(window_id) == clip_id {
                     if let Some(surf) = &mut self.clip_surface {
                         let sz = surf.window.inner_size();
                         surf.resize(&self.gpu, sz.width, sz.height);
-                        surf.window.request_redraw();
+                        if surf.surface.is_some() {
+                            surf.window.request_redraw();
+                        }
                     }
                 } else if Some(window_id) == alttab_id {
                     if let Some(surf) = &mut self.alttab_surface {
                         let sz = surf.window.inner_size();
                         surf.resize(&self.gpu, sz.width, sz.height);
-                        surf.window.request_redraw();
+                        if surf.surface.is_some() {
+                            surf.window.request_redraw();
+                        }
                     }
                 } else if let Some(idx) = screenshot_idx {
                     if let Some(surf) = self.screenshot_surfaces.get_mut(idx) {
                         let sz = surf.window.inner_size();
                         surf.resize(&self.gpu, sz.width, sz.height);
-                        surf.window.request_redraw();
+                        if surf.surface.is_some() {
+                            surf.window.request_redraw();
+                        }
                     }
                 }
             }
@@ -1192,6 +1494,15 @@ impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
                     }
                 }
             }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                ..
+            } => {
+                if Some(window_id) == main_id {
+                    self.hide_mini_popover();
+                    self.hide_clipboard_drawer();
+                }
+            }
             WindowEvent::Focused(true) => {
                 if Some(window_id) == main_id {
                     core_input::notify_permissions_changed();
@@ -1203,7 +1514,20 @@ impl ApplicationHandler<AppUserEvent> for OmniGpuApp {
             }
             WindowEvent::Focused(false) => {
                 if Some(window_id) == mini_id {
-                    self.hide_mini_popover();
+                    let in_opening_grace = self
+                        .last_mini_show_instant
+                        .map(|t| t.elapsed() < std::time::Duration::from_millis(260))
+                        .unwrap_or(false);
+                    if in_opening_grace {
+                        if let Some(mini) = &self.mini_surface {
+                            unsafe {
+                                reassert_overlay_key_focus(&mini.window);
+                            }
+                        }
+                    } else if self.hide_mini_popover() {
+                        let pos = core_display::get_mouse_cursor_position();
+                        self.last_mini_auto_hide = Some((std::time::Instant::now(), pos));
+                    }
                 } else if Some(window_id) == clip_id {
                     self.hide_clipboard_drawer();
                 } else if Some(window_id) == alttab_id {
@@ -1355,4 +1679,51 @@ fn main() {
     event_loop
         .run_app(&mut app)
         .expect("Failed to run Pure Rust GPU EventLoop");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_suppress_toggle_after_auto_hide;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn test_should_suppress_toggle_after_auto_hide_cases() {
+        let base = Instant::now();
+
+        // 1. No prior auto-hide -> never suppress (1st open & 3rd reopen after .take())
+        assert!(!should_suppress_toggle_after_auto_hide(
+            None,
+            base,
+            (-416.0, -84.0),
+        ));
+
+        // 2. Auto-hide on MouseDown at status item followed 220ms and 800ms later by MouseUp at same spot
+        let auto = Some((base, (-416.0, -84.0)));
+        assert!(should_suppress_toggle_after_auto_hide(
+            auto,
+            base + Duration::from_millis(220),
+            (-414.0, -84.0),
+        ));
+        assert!(should_suppress_toggle_after_auto_hide(
+            auto,
+            base + Duration::from_millis(800),
+            (-414.0, -84.0),
+        ));
+
+        // 3. Outside click on another window followed 250ms later by clicking status item -> open immediately
+        let outside_other_window = Some((base, (500.0, 500.0)));
+        assert!(!should_suppress_toggle_after_auto_hide(
+            outside_other_window,
+            base + Duration::from_millis(250),
+            (-416.0, -84.0),
+        ));
+
+        // 4. Outside click on another menu bar item followed 250ms later by clicking our status item -> open immediately
+        let outside_other_menubar = Some((base, (-250.0, -84.0)));
+        assert!(!should_suppress_toggle_after_auto_hide(
+            outside_other_menubar,
+            base + Duration::from_millis(250),
+            (-416.0, -84.0),
+        ));
+    }
 }

@@ -90,6 +90,8 @@ pub enum AppUserEvent {
     ShowAboutDialog,
     OpenDashboardTab(String),
     HideLauncher,
+    MacAppDidHide,
+    GlobalMouseDownOutsideApp,
     QuitApp,
 }
 

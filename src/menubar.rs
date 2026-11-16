@@ -5,7 +5,7 @@ use crate::macos_window::{
     set_macos_dock_icon,
 };
 use std::ffi::{c_char, c_void, CString};
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 use egui_winit::winit::event_loop::EventLoopProxy;
 
@@ -13,12 +13,98 @@ static MENUBAR_EVENT_PROXY: OnceLock<Mutex<Option<EventLoopProxy<AppUserEvent>>>
 static STATUS_ITEM_PTR: AtomicIsize = AtomicIsize::new(0);
 static STATUS_BUTTON_PTR: AtomicIsize = AtomicIsize::new(0);
 static TARGET_OBJ_PTR: AtomicIsize = AtomicIsize::new(0);
+static LAST_STATUS_CLICK_MS: AtomicIsize = AtomicIsize::new(0);
+static SUPPRESS_REOPEN_UNTIL_MS: AtomicIsize = AtomicIsize::new(0);
+static OUTSIDE_CLICK_MONITOR_ACTIVE: AtomicBool = AtomicBool::new(false);
+static GLOBAL_MOUSE_MONITOR_PTR: AtomicIsize = AtomicIsize::new(0);
+
+pub fn set_outside_click_monitor_active(active: bool) {
+    OUTSIDE_CLICK_MONITOR_ACTIVE.store(active, Ordering::Relaxed);
+}
+
+extern "C" {
+    static _NSConcreteGlobalBlock: c_void;
+}
+
+#[repr(C)]
+struct GlobalBlockDescriptor {
+    reserved: usize,
+    size: usize,
+    signature: *const c_char,
+    layout: *const c_void,
+}
+
+unsafe impl Sync for GlobalBlockDescriptor {}
+
+#[repr(C)]
+struct GlobalObjcBlock {
+    isa: *const c_void,
+    flags: i32,
+    reserved: i32,
+    invoke: unsafe extern "C" fn(*mut GlobalObjcBlock, *mut c_void),
+    descriptor: *const GlobalBlockDescriptor,
+}
+
+unsafe impl Sync for GlobalObjcBlock {}
+
+unsafe extern "C" fn global_mouse_monitor_invoke(
+    _block: *mut GlobalObjcBlock,
+    event: *mut c_void,
+) {
+    if !OUTSIDE_CLICK_MONITOR_ACTIVE.load(Ordering::Relaxed) || event.is_null() {
+        return;
+    }
+    type MsgUsize = unsafe extern "C" fn(*mut c_void, *mut c_void) -> usize;
+    let msg_usize: MsgUsize = std::mem::transmute(objc_msgSend as *const c_void);
+    let ev_type = msg_usize(event, sel_registerName(c"type".as_ptr()));
+    let user_ev = match ev_type {
+        // NSEventTypeLeftMouseDown (1), RightMouseDown (3), OtherMouseDown (25)
+        1 | 3 | 25 => Some(AppUserEvent::GlobalMouseDownOutsideApp),
+        _ => None,
+    };
+    if let Some(ev) = user_ev {
+        if let Some(lock) = MENUBAR_EVENT_PROXY.get() {
+            if let Ok(guard) = lock.lock() {
+                if let Some(proxy) = guard.as_ref() {
+                    let _ = proxy.send_event(ev);
+                }
+            }
+        }
+    }
+}
+
+static GLOBAL_MOUSE_DESCRIPTOR: GlobalBlockDescriptor = GlobalBlockDescriptor {
+    reserved: 0,
+    size: std::mem::size_of::<GlobalObjcBlock>(),
+    signature: c"v16@?0@8".as_ptr(),
+    layout: std::ptr::null(),
+};
+
+static GLOBAL_MOUSE_BLOCK: GlobalObjcBlock = GlobalObjcBlock {
+    isa: unsafe { &_NSConcreteGlobalBlock as *const c_void },
+    // BLOCK_IS_GLOBAL (1 << 28) | BLOCK_HAS_SIGNATURE (1 << 30)
+    flags: (1 << 28) | (1 << 30),
+    reserved: 0,
+    invoke: global_mouse_monitor_invoke,
+    descriptor: &GLOBAL_MOUSE_DESCRIPTOR as *const GlobalBlockDescriptor,
+};
+
+pub fn suppress_reopen_for_ms(duration_ms: isize) {
+    let until = (core_input::now_ms() as isize).saturating_add(duration_ms);
+    SUPPRESS_REOPEN_UNTIL_MS.store(until, Ordering::Relaxed);
+}
 
 unsafe extern "C" fn status_bar_item_clicked(
     _this: *mut c_void,
     _cmd: *mut c_void,
     _sender: *mut c_void,
 ) {
+    let now = core_input::now_ms() as isize;
+    let prev = LAST_STATUS_CLICK_MS.swap(now, Ordering::Relaxed);
+    if now - prev < 150 {
+        return; // debounce rapid double-clicks / switch bounce
+    }
+    suppress_reopen_for_ms(1000);
     if let Some(lock) = MENUBAR_EVENT_PROXY.get() {
         if let Ok(guard) = lock.lock() {
             if let Some(proxy) = guard.as_ref() {
@@ -90,6 +176,12 @@ unsafe extern "C" fn app_should_handle_reopen(
     _sender: *mut c_void,
     _has_visible_windows: bool,
 ) -> bool {
+    let now = core_input::now_ms() as isize;
+    if now.saturating_sub(LAST_STATUS_CLICK_MS.load(Ordering::Relaxed)) < 1000
+        || now < SUPPRESS_REOPEN_UNTIL_MS.load(Ordering::Relaxed)
+    {
+        return false;
+    }
     if let Some(lock) = MENUBAR_EVENT_PROXY.get() {
         if let Ok(guard) = lock.lock() {
             if let Some(proxy) = guard.as_ref() {
@@ -98,6 +190,21 @@ unsafe extern "C" fn app_should_handle_reopen(
         }
     }
     true
+}
+
+unsafe extern "C" fn app_did_hide(
+    _this: *mut c_void,
+    _cmd: *mut c_void,
+    _notif: *mut c_void,
+) {
+    suppress_reopen_for_ms(500);
+    if let Some(lock) = MENUBAR_EVENT_PROXY.get() {
+        if let Ok(guard) = lock.lock() {
+            if let Some(proxy) = guard.as_ref() {
+                let _ = proxy.send_event(AppUserEvent::MacAppDidHide);
+            }
+        }
+    }
 }
 
 /// Handle `applicationShouldTerminate:` on `NSApplicationDelegate`.
@@ -282,6 +389,14 @@ pub unsafe fn setup_macos_application_menu() {
                         sel_term,
                         term_imp,
                         c"L@:@".as_ptr(),
+                    );
+
+                    let sel_did_hide = sel_registerName(c"applicationDidHide:".as_ptr());
+                    let _ = class_addMethod(
+                        delegate_cls,
+                        sel_did_hide,
+                        app_did_hide,
+                        c"v@:@".as_ptr(),
                     );
                 }
             }
@@ -757,6 +872,40 @@ pub fn init_native_macos_menubar_item(proxy: EventLoopProxy<AppUserEvent>) {
                 sel_registerName(c"setAction:".as_ptr()),
                 sel_registerName(c"statusItemClicked:".as_ptr()),
             );
+            // Configure NSStatusBarButton to fire strictly once on LeftMouseUp or RightMouseUp
+            // (NSEventMaskLeftMouseUp = (1 << 2), NSEventMaskRightMouseUp = (1 << 4)), matching
+            // AppKit's default and WindowServer's secondary-display Menu Bar trigger without double-firing.
+            type Msg1Isize = unsafe extern "C" fn(*mut c_void, *mut c_void, isize) -> isize;
+            let msg1_isize: Msg1Isize = std::mem::transmute(objc_msgSend as *const c_void);
+            let _ = msg1_isize(
+                button,
+                sel_registerName(c"sendActionOn:".as_ptr()),
+                (1 << 2) | (1 << 4),
+            );
+        }
+
+        if GLOBAL_MOUSE_MONITOR_PTR.load(Ordering::SeqCst) == 0 {
+            let ns_event_cls = objc_getClass(c"NSEvent".as_ptr());
+            if !ns_event_cls.is_null() {
+                type MsgMonitor = unsafe extern "C" fn(
+                    *mut c_void,
+                    *mut c_void,
+                    usize,
+                    *const GlobalObjcBlock,
+                ) -> *mut c_void;
+                let msg_mon: MsgMonitor = std::mem::transmute(objc_msgSend as *const c_void);
+                let mask: usize = (1 << 1) | (1 << 3) | (1 << 25);
+                let mon = msg_mon(
+                    ns_event_cls,
+                    sel_registerName(c"addGlobalMonitorForEventsMatchingMask:handler:".as_ptr()),
+                    mask,
+                    &GLOBAL_MOUSE_BLOCK as *const GlobalObjcBlock,
+                );
+                if !mon.is_null() {
+                    let _ = msg0(mon, sel_registerName(c"retain".as_ptr()));
+                    GLOBAL_MOUSE_MONITOR_PTR.store(mon as isize, Ordering::SeqCst);
+                }
+            }
         }
 
         setup_macos_application_menu();
